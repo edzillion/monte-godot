@@ -18,10 +18,17 @@ config/icon="res://icon.svg"
 
 Utils="*res://src/utils/utils.gd"
 Logger="*res://src/utils/logger.gd"
+GDStats="*res://addons/gdstats - godot v3/gdstats.gd"
+ProbabilityServer="*res://addons/gdstats - godot v3/gdstats.gd"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/easy_charts/plugin.cfg", "res://addons/numdot/plugin.cfg", "res://addons/picklegd/plugin.cfg", "res://addons/gdUnit4/plugin.cfg")
+enabled=PackedStringArray("res://addons/easy_charts/plugin.cfg", "res://addons/gdUnit4/plugin.cfg", "res://addons/gdstats - godot v3/plugin.cfg", "res://addons/numdot/plugin.cfg", "res://addons/picklegd/plugin.cfg")
+
+[gdunit4]
+
+settings/test/test_lookup_folder="tests"
+ui/toolbar/run_overall=true
 
 [rendering]
 
