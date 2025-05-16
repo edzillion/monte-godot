@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3 uid="uid://bk7tyn32ivb8e"]
+
+[ext_resource type="Script" uid="uid://oybu5nrrx8jw" path="res://examples/estimate_pi.gd" id="1_jtx4b"]
+
+[node name="PiScene" type="Node"]
+
+[node name="PiRunner" type="Node" parent="."]
+script = ExtResource("1_jtx4b")

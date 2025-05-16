@@ -5,6 +5,5 @@ android/
 node_modules/
 out/
 src/
-test/
 tools/
 godot-mcp/

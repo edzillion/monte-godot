@@ -1,0 +1,81 @@
+[gd_scene load_steps=2 format=3 uid="uid://boifuflqow5sx"]
+
+[ext_resource type="Script" uid="uid://2xu2806q4v8d" path="res://example/picklegd/picklestudio.gd" id="1_luspn"]
+
+[node name="picklestudio" type="Control"]
+layout_mode = 3
+anchors_preset = 0
+offset_left = 58.0
+offset_top = 107.0
+offset_right = 755.0
+offset_bottom = 592.0
+script = ExtResource("1_luspn")
+
+[node name="Label" type="Label" parent="."]
+layout_mode = 0
+offset_left = 16.0
+offset_top = 7.0
+offset_right = 56.0
+offset_bottom = 30.0
+text = "Pickle size (bytes): 0"
+
+[node name="textbox" type="TextEdit" parent="."]
+layout_mode = 2
+offset_left = 17.0
+offset_top = 105.0
+offset_right = 334.0
+offset_bottom = 216.0
+size_flags_horizontal = 3
+placeholder_text = "o' sphinx of black quartz, judge my vow"
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+layout_mode = 0
+offset_left = 15.0
+offset_top = 41.0
+offset_right = 387.0
+offset_bottom = 81.0
+
+[node name="Button" type="Button" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Send!"
+
+[node name="DoubleButton" type="Button" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Double It!!"
+
+[node name="ClearButton" type="Button" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Clear"
+
+[node name="HScrollBar" type="HScrollBar" parent="."]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 229.0
+offset_right = 338.0
+offset_bottom = 237.0
+max_value = 4.0
+step = 1.0
+value = 2.0
+rounded = true
+
+[node name="CheckButton" type="CheckButton" parent="."]
+layout_mode = 0
+offset_left = 14.0
+offset_top = 244.0
+offset_right = 58.0
+offset_bottom = 268.0
+
+[node name="ColorPickerButton" type="ColorPickerButton" parent="."]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 277.0
+offset_right = 88.0
+offset_bottom = 308.0
+color = Color(0, 0, 1, 1)
+
+[connection signal="pressed" from="HBoxContainer/Button" to="." method="_on_button_pressed"]
+[connection signal="pressed" from="HBoxContainer/DoubleButton" to="." method="_on_double_button_pressed"]
+[connection signal="pressed" from="HBoxContainer/ClearButton" to="." method="_on_clear_button_pressed"]
