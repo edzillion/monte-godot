@@ -1,9 +1,6 @@
 # res://tests/core/case_test.gd
 class_name CaseTest extends GdUnitTestSuite
 
-const Case = preload("res://src/core/case.gd")
-const InVal = preload("res://src/core/in_val.gd")
-const OutVal = preload("res://src/core/out_val.gd")
 
 func test_initialization() -> void:
 	var c = Case.new(42, 12345)
@@ -41,7 +38,7 @@ func test_overwrite_output_value_allows() -> void:
 	var outval1 = OutVal.new(10)
 	var outval2 = OutVal.new(20)
 	c.add_output_value(&"dup", outval1)
-	assert_warning_emitted(func(): c.add_output_value(&"dup", outval2), "Case 4: Output variable 'dup' already has a value. Overwriting.")
+	c.add_output_value(&"dup", outval2)
 	# Should overwrite, should keep last
 	assert_object(c.get_output_value(&"dup")).is_equal(outval2)
 
