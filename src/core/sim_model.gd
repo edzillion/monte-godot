@@ -20,39 +20,6 @@ var simulation_results: Variant = null
 var is_configured: bool = false
 #endregion
 
-#region Constants
-const AUTO_BATCH_DEFAULT_TARGET_PER_BATCH: int = 5000
-const AUTO_BATCH_MINIMUM_SIZE: int = 500
-const AUTO_BATCH_MAX_TOTAL_BATCHES: int = 1000
-#endregion
-
-#region Helper Methods for Batch Sizing
-func _calculate_automatic_batch_size(p_n_cases: int) -> int:
-	if p_n_cases <= 0:
-		Logger.debug("SimManager: AutoBatch - N_CASES is <= 0, returning default batch size 1.")
-		return 1
-
-	var calculated_batch_size: int = AUTO_BATCH_DEFAULT_TARGET_PER_BATCH
-	Logger.debug("SimManager: AutoBatch - Initial target: %d" % calculated_batch_size)
-
-	# If the default target per batch would result in too many total batches, adjust.
-	if calculated_batch_size > 0 and (float(p_n_cases) / float(calculated_batch_size)) > float(AUTO_BATCH_MAX_TOTAL_BATCHES):
-		calculated_batch_size = int(ceil(float(p_n_cases) / float(AUTO_BATCH_MAX_TOTAL_BATCHES)))
-		Logger.debug("SimManager: AutoBatch - Adjusted for MAX_TOTAL_BATCHES (%d). New BS: %d" % [AUTO_BATCH_MAX_TOTAL_BATCHES, calculated_batch_size])
-
-	# Ensure batch size isn't below our defined minimum.
-	calculated_batch_size = max(calculated_batch_size, AUTO_BATCH_MINIMUM_SIZE)
-	Logger.debug("SimManager: AutoBatch - After MINIMUM_SIZE (%d) check. New BS: %d" % [AUTO_BATCH_MINIMUM_SIZE, calculated_batch_size])
-
-	# Ensure batch size isn't larger than the total number of cases.
-	calculated_batch_size = min(calculated_batch_size, p_n_cases)
-	Logger.debug("SimManager: AutoBatch - After N_CASES (%d) cap. New BS: %d" % [p_n_cases, calculated_batch_size])
-
-	# Ensure it's at least 1.
-	var final_batch_size: int = max(1, calculated_batch_size)
-	Logger.info("SimManager: AutoBatch - Final calculated batch size: %d for N_CASES: %d" % [final_batch_size, p_n_cases])
-	return final_batch_size
-#endregion
 
 #region Initialization
 func _init(p_model_name: String, p_model_description: String = "", p_sim_manager:SimManager = null) -> void:

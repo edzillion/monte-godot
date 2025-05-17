@@ -1,8 +1,6 @@
 # res://src/core/in_var.gd
 class_name InVar extends Var
 
-const InValScript = preload("res://src/core/in_val.gd") # For fallback
-
 ## @brief Represents an input variable in the simulation.
 ##
 ## Extends Var to include details specific to input variables, such as
@@ -116,7 +114,7 @@ func get_value_for_case(case_idx: int, p_in_val_pool: ObjectPool) -> InVal:
 	
 	if not acquired_in_val:
 		Logger.error("InVar '%s': Failed to acquire InVal from pool for case %d. Creating directly (fallback)." % [name, case_idx])
-		acquired_in_val = InValScript.new() as InVal # Fallback
+		acquired_in_val = InVal.new()
 		if not acquired_in_val:
 			Logger.critical("InVar '%s': CRITICAL - Failed to create InVal even with direct instantiation for case %d." % [name, case_idx])
 			return null # Cannot proceed

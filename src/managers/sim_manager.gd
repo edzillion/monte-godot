@@ -3,10 +3,14 @@ class_name SimManager extends Node
 
 const EasyChartsDataFrame = preload("res://addons/easy_charts/utilities/classes/structures/data_frame.gd")
 const EasyChartsMatrix = preload("res://addons/easy_charts/utilities/classes/structures/matrix.gd") # DataFrame uses Matrix
-const ObjectPool = preload("res://src/utils/object_pool.gd")
 const CaseScript = preload("res://src/core/case.gd")
-const InValScript = preload("res://src/core/in_val.gd") # Added
-const OutValScript = preload("res://src/core/out_val.gd") # Added
+const InValScript = preload("res://src/core/in_val.gd")
+const OutValScript = preload("res://src/core/out_val.gd")
+
+# Constants for automatic batch sizing heuristic
+const AUTO_BATCH_DEFAULT_TARGET_PER_BATCH: int = 5000
+const AUTO_BATCH_MINIMUM_SIZE: int = 500
+const AUTO_BATCH_MAX_TOTAL_BATCHES: int = 1000
 
 ## @brief Orchestrates the entire Monte Carlo simulation process.
 ##
@@ -84,6 +88,34 @@ var _out_val_pool: ObjectPool # Added
 
 
 #region Static Methods
+#endregion
+
+#region Helper Methods for Batch Sizing
+func _calculate_automatic_batch_size(p_n_cases: int) -> int:
+	if p_n_cases <= 0:
+		Logger.debug("SimManager: AutoBatch - N_CASES is <= 0, returning default batch size 1.")
+		return 1
+
+	var calculated_batch_size: int = AUTO_BATCH_DEFAULT_TARGET_PER_BATCH
+	Logger.debug("SimManager: AutoBatch - Initial target: %d" % calculated_batch_size)
+
+	# If the default target per batch would result in too many total batches, adjust.
+	if calculated_batch_size > 0 and (float(p_n_cases) / float(calculated_batch_size)) > float(AUTO_BATCH_MAX_TOTAL_BATCHES):
+		calculated_batch_size = int(ceil(float(p_n_cases) / float(AUTO_BATCH_MAX_TOTAL_BATCHES)))
+		Logger.debug("SimManager: AutoBatch - Adjusted for MAX_TOTAL_BATCHES (%d). New BS: %d" % [AUTO_BATCH_MAX_TOTAL_BATCHES, calculated_batch_size])
+
+	# Ensure batch size isn't below our defined minimum.
+	calculated_batch_size = max(calculated_batch_size, AUTO_BATCH_MINIMUM_SIZE)
+	Logger.debug("SimManager: AutoBatch - After MINIMUM_SIZE (%d) check. New BS: %d" % [AUTO_BATCH_MINIMUM_SIZE, calculated_batch_size])
+
+	# Ensure batch size isn't larger than the total number of cases.
+	calculated_batch_size = min(calculated_batch_size, p_n_cases)
+	Logger.debug("SimManager: AutoBatch - After N_CASES (%d) cap. New BS: %d" % [p_n_cases, calculated_batch_size])
+
+	# Ensure it's at least 1.
+	var final_batch_size: int = max(1, calculated_batch_size)
+	Logger.info("SimManager: AutoBatch - Final calculated batch size: %d for N_CASES: %d" % [final_batch_size, p_n_cases])
+	return final_batch_size
 #endregion
 
 
