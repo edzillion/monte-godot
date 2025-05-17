@@ -32,7 +32,7 @@ func test_overwrite_input_value_warns() -> void:
 	var inval1 = InVal.new(1)
 	var inval2 = InVal.new(2)
 	c.add_input_value(&"dup", inval1)
-	c.add_input_value(&"dup", inval2)
+	assert_warning_emitted(func(): c.add_input_value(&"dup", inval2), "Case 3: Input variable 'dup' already has a value. Overwriting not allowed by default.")
 	# Should not overwrite, should keep first
 	assert_object(c.get_input_value(&"dup")).is_equal(inval1)
 
@@ -41,13 +41,14 @@ func test_overwrite_output_value_allows() -> void:
 	var outval1 = OutVal.new(10)
 	var outval2 = OutVal.new(20)
 	c.add_output_value(&"dup", outval1)
-	c.add_output_value(&"dup", outval2)
+	assert_warning_emitted(func(): c.add_output_value(&"dup", outval2), "Case 4: Output variable 'dup' already has a value. Overwriting.")
 	# Should overwrite, should keep last
 	assert_object(c.get_output_value(&"dup")).is_equal(outval2)
 
 func test_get_input_value_missing_warns_and_returns_null() -> void:
 	var c = Case.new(5, 5)
-	assert_object(c.get_input_value(&"missing")).is_null()
+	assert_warning_emitted(func(): c.get_input_value(&"missing"), "Case 5: Input variable 'missing' not found.")
+	assert_object(c.get_input_value(&"missing")).is_null() # Call again to get the null for assertion
 
 func test_get_output_value_missing_returns_null() -> void:
 	var c = Case.new(6, 6)
