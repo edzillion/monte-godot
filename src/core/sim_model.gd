@@ -116,8 +116,8 @@ func run_simulation() -> bool:
 	for outvar in _output_vars:
 		if outvar and outvar.id:
 			output_vars_dict[outvar.id] = outvar
-
-	# Call the refactored SimManager.run_simulation with all parameters
+	
+	
 	var success: bool = sim_manager.run_simulation(
 		_num_cases,
 		_preprocess_callable,
@@ -125,7 +125,7 @@ func run_simulation() -> bool:
 		_postprocess_callable,
 		_max_threads,
 		_batch_size,
-		input_vars_dict, 
+		input_vars_dict,
 		output_vars_dict,
 		_output_as_dataframe,
 		_in_var_use_pregeneration_setting # Pass the new flag

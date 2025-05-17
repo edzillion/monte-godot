@@ -4,12 +4,12 @@ extends Node
 # Preload necessary classes
 const EasyChartsDataFrame = preload("res://addons/easy_charts/utilities/classes/structures/data_frame.gd") # For type checking results
 
-@export var use_pregeneration: bool = false # Control InVar value generation strategy
+@export var use_pregeneration: bool = true # Control InVar value generation strategy
 
 var N_CASES: int = 1_000_000
 var OUTPUT_DATAFRAME: bool = false # Set to true to test DataFrame output
 var MAX_THREADS_FOR_PI_SIM: int = 0 # Explicitly set to 1 thread for testing high case count
-var BATCH_SIZE: int = 100_000 # New constant for batch size
+var BATCH_SIZE: int = 10_000 # New constant for batch size
 
 var pi_model: SimModel
 var _current_inside_circle_count: int = 0 # Accumulator for points inside the circle

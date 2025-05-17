@@ -49,43 +49,93 @@ func test_model_initialization() -> void:
 		model_with_default_sm.sim_manager.free()
 
 
-func test_configure_simulation() -> void:
+func test_configuration_storage() -> void: # Renamed from test_configure_simulation
 	var preprocess_func: Callable = func(_case): return []
 	var run_func: Callable = func(_inputs): return null
 	var postprocess_func: Callable = func(_case, _outputs): pass
 
-	var invar1 = InVar.new(&"in1", "Input1")
+	var invar1 = InVar.new(&"in1", "Input1", InVar.DistributionType.CUSTOM, {}, true, {0.0:"test_val"}) # Default type is CUSTOM, provide a num_map
 	var outvar1 = OutVar.new(&"out1", "Output1")
+	var input_vars_array: Array[InVar] = [invar1]
+	var output_vars_array: Array[OutVar] = [outvar1]
 
 	sim_model.configure_simulation(
-		100, preprocess_func, run_func, postprocess_func, 4, 1000, [invar1], [outvar1], true
+		100, preprocess_func, run_func, postprocess_func, 4, 50, input_vars_array, output_vars_array, true, false
 	)
 	
-	# mock_sim_manager is the one passed to SimModel constructor, so SimModel holds the reference.
-	var actual_sim_manager_mock = sim_model.sim_manager 
-
-	assert_int(actual_sim_manager_mock.n_cases).is_equal(100)
-	assert_int(actual_sim_manager_mock.max_threads).is_equal(4)
-	assert_bool(actual_sim_manager_mock.output_as_dataframe).is_true()
-	
-	verify(actual_sim_manager_mock).set_simulation_functions(preprocess_func, run_func, postprocess_func)
-	verify(actual_sim_manager_mock).add_input_variable(invar1)
-	verify(actual_sim_manager_mock).add_output_variable(outvar1)
+	# Verify that SimModel has stored the configuration internally
+	assert_int(sim_model._num_cases).is_equal(100)
+	assert_object(sim_model._preprocess_callable).is_equal(preprocess_func)
+	assert_object(sim_model._run_callable).is_equal(run_func)
+	assert_object(sim_model._postprocess_callable).is_equal(postprocess_func)
+	assert_int(sim_model._max_threads).is_equal(4)
+	assert_int(sim_model._batch_size).is_equal(50)
+	assert_array(sim_model._input_vars).is_equal(input_vars_array)
+	assert_array(sim_model._output_vars).is_equal(output_vars_array)
+	assert_bool(sim_model._output_as_dataframe).is_true()
+	assert_bool(sim_model._in_var_use_pregeneration_setting).is_false()
+	assert_bool(sim_model.is_configured).is_true()
+	assert_object(sim_model.simulation_results).is_null() # Should be reset
+	assert_str(sim_model.current_run_id).is_empty() # Should be reset
 
 
 func test_run_simulation() -> void:
 	# Configure the simulation first
-	var preprocess_func: Callable = func(_case): return []
-	var run_func: Callable = func(_inputs): return null
-	var postprocess_func: Callable = func(_case, _outputs): pass
+	var n_cases_val: int = 10
+	var preprocess_func_val: Callable = func(_case): return []
+	var run_func_val: Callable = func(_inputs): return null
+	var postprocess_func_val: Callable = func(_case, _outputs): pass
+	var max_threads_val: int = 2
+	var batch_size_val: int = 5
+	var invar1: InVar = InVar.new(&"in_a", "InputA", InVar.DistributionType.UNIFORM, {"a":0.0, "b":1.0})
+	var invar2: InVar = InVar.new(&"in_b", "InputB", InVar.DistributionType.UNIFORM, {"a":0.0, "b":1.0})
+	var input_vars_arr: Array[InVar] = [invar1, invar2]
+	var outvar1: OutVar = OutVar.new(&"out_x", "OutputX")
+	var output_vars_arr: Array[OutVar] = [outvar1]
+	var output_df_val: bool = true
+	var invar_pregen_val: bool = false
+
 	sim_model.configure_simulation(
-		10, preprocess_func, run_func, postprocess_func, 0, 1000, [], [], false
+		n_cases_val, preprocess_func_val, run_func_val, postprocess_func_val, \
+		max_threads_val, batch_size_val, input_vars_arr, output_vars_arr, \
+		output_df_val, invar_pregen_val
+	)
+
+	# Expected dictionaries for SimManager call
+	var expected_input_vars_dict: Dictionary = {invar1.id: invar1, invar2.id: invar2}
+	var expected_output_vars_dict: Dictionary = {outvar1.id: outvar1}
+
+	# Set up mock return value with all required arguments
+	var mock_manager = sim_model.sim_manager
+	do_return(true).on(mock_manager).run_simulation(
+		n_cases_val,
+		preprocess_func_val,
+		run_func_val,
+		postprocess_func_val,
+		max_threads_val,
+		batch_size_val,
+		expected_input_vars_dict,
+		expected_output_vars_dict,
+		output_df_val,
+		invar_pregen_val
 	)
 
 	var result: bool = sim_model.run_simulation()
 	assert_bool(result).is_true()
-	# mock_sim_manager is the one passed to SimModel constructor
-	verify(sim_model.sim_manager).run_simulation() 
+
+	# Verify the call happened with correct arguments
+	verify(mock_manager).run_simulation(
+		n_cases_val,
+		preprocess_func_val,
+		run_func_val,
+		postprocess_func_val,
+		max_threads_val,
+		batch_size_val,
+		expected_input_vars_dict,
+		expected_output_vars_dict,
+		output_df_val,
+		invar_pregen_val
+	)
 
 
 func test_get_results_placeholder() -> void:

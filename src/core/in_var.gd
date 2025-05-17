@@ -47,6 +47,7 @@ var _param_exponential_lambda: float # Rate parameter
 var _param_hist_values: PackedFloat32Array # Must be floats
 var _param_hist_cumulative_probs: PackedFloat32Array # Pre-calculated for histogram sampling
 var _custom_map_keys_as_float_array: PackedFloat32Array # For CUSTOM type, if keys are numeric
+var _gdstats_hist_probs_param: PackedFloat32Array # For ProbabilityServer.randv_histogram
 
 #endregion
 
@@ -101,42 +102,63 @@ func _cache_distribution_parameters(params: Dictionary) -> void:
 			_param_poisson_lambda = Utils.get_safe(params, "lambda", 1.0)
 			_param_poisson_lambda = max(0.000001, _param_poisson_lambda)
 		DistributionType.EXPONENTIAL:
-			_param_exponential_lambda = Utils.get_safe(params, "lambda", 1.0) # This is the rate for Godot's randf_exp
+			_param_exponential_lambda = Utils.get_safe(params, "lambda", 1.0)
 			_param_exponential_lambda = max(0.000001, _param_exponential_lambda)
 		DistributionType.HISTOGRAM:
 			var values_arr: Array = Utils.get_safe(params, "values", [])
 			var probs_arr: Array = Utils.get_safe(params, "probabilities", [])
 			if values_arr.size() != probs_arr.size() or values_arr.is_empty():
 				push_error("InVar '%s' (HISTOGRAM): 'values' and 'probabilities' must be non-empty and of same size." % name)
-				# Fallback to a single value to prevent crashes, though this is bad data.
-				_param_hist_values = PackedFloat32Array([0.0])
-				_param_hist_cumulative_probs = PackedFloat32Array([1.0])
+				_param_hist_values = PackedFloat32Array([0.0]) # Fallback numeric values
+				_param_hist_cumulative_probs = PackedFloat32Array([1.0]) # Fallback for old method, not used by ProbabilityServer
+				_gdstats_hist_probs_param = PackedFloat32Array([1.0]) # Fallback for ProbabilityServer
 			else:
-				_param_hist_values = PackedFloat32Array()
-				_param_hist_cumulative_probs = PackedFloat32Array()
+				_param_hist_values = PackedFloat32Array() # For ProbabilityServer.randv_histogram, stores validated float values
+				var validated_probs: Array[float] = [] # For ProbabilityServer.randv_histogram, stores validated float probabilities
 				var current_sum: float = 0.0
 				for i in range(values_arr.size()):
 					var val = values_arr[i]
 					var prob = probs_arr[i]
 					if not (val is float or val is int):
 						push_error("InVar '%s' (HISTOGRAM): All 'values' must be numeric. Found: %s" % [name, typeof(val)])
-						# Skip this invalid entry or handle error appropriately
 						continue
 					if not (prob is float or prob is int) or prob < 0:
 						push_error("InVar '%s' (HISTOGRAM): All 'probabilities' must be non-negative numbers. Found: %s" % [name, typeof(prob)])
-						# Skip
 						continue
 					_param_hist_values.append(float(val))
+					validated_probs.append(float(prob))
 					current_sum += float(prob)
-					_param_hist_cumulative_probs.append(current_sum)
-				# Normalize cumulative probabilities
-				if current_sum > 0:
-					for i in range(_param_hist_cumulative_probs.size()):
-						_param_hist_cumulative_probs[i] /= current_sum
-				else: # All probs were zero, create a fallback
+				
+				if _param_hist_values.is_empty(): # All values/probs were invalid
+					push_error("InVar '%s' (HISTOGRAM): No valid numeric values/probabilities found. Defaulting." % name)
 					_param_hist_values = PackedFloat32Array([0.0])
-					_param_hist_cumulative_probs = PackedFloat32Array([1.0])
-					push_warning("InVar '%s' (HISTOGRAM): Sum of probabilities is zero. Defaulting to value 0 with prob 1." % name)
+					_gdstats_hist_probs_param = PackedFloat32Array([1.0])
+					_param_hist_cumulative_probs = PackedFloat32Array([1.0]) # For potential fallback if needed
+				else:
+					# Normalize probabilities for ProbabilityServer.randv_histogram
+					_gdstats_hist_probs_param = PackedFloat32Array()
+					if current_sum > 0:
+						for p_val in validated_probs:
+							_gdstats_hist_probs_param.append(p_val / current_sum)
+					else: # All probs were zero, create a fallback (e.g., uniform for valid values or single value)
+						push_warning("InVar '%s' (HISTOGRAM): Sum of probabilities is zero. Defaulting to uniform probability for %d values." % [name, _param_hist_values.size()])
+						var uniform_prob = 1.0 / float(_param_hist_values.size()) if not _param_hist_values.is_empty() else 1.0
+						for _j in range(_param_hist_values.size()):
+							_gdstats_hist_probs_param.append(uniform_prob)
+						if _gdstats_hist_probs_param.is_empty(): # Should not happen if _param_hist_values wasn't empty
+							_param_hist_values = PackedFloat32Array([0.0]) # Final fallback
+							_gdstats_hist_probs_param = PackedFloat32Array([1.0])
+					
+					# _param_hist_cumulative_probs is no longer primarily needed if using ProbabilityServer
+					# but we can keep its calculation for reference or fallback for now.
+					_param_hist_cumulative_probs = PackedFloat32Array() 
+					var temp_cumulative_sum: float = 0.0
+					for norm_prob in _gdstats_hist_probs_param: # Use normalized probs for cumulative
+						temp_cumulative_sum += norm_prob
+						_param_hist_cumulative_probs.append(temp_cumulative_sum)
+					# Ensure the last cumulative probability is 1.0 due to potential float inaccuracies
+					if not _param_hist_cumulative_probs.is_empty():
+						_param_hist_cumulative_probs[_param_hist_cumulative_probs.size()-1] = 1.0
 
 		DistributionType.CUSTOM:
 			if num_map.is_empty():
@@ -185,45 +207,33 @@ func configure_for_simulation(total_cases: int) -> void:
 ## @brief Internal helper to generate a single value based on distribution_type using the local _rng.
 ## Assumes _rng has been seeded appropriately for the current case before this call.
 func _generate_value_from_distribution_with_local_rng() -> float:
+	# Attempt to seed ProbabilityServer' internal RNG if it has one accessible and named 'rng'.
+	# This line is speculative and depends on the user's updated ProbabilityServer version.
+
 	match distribution_type:
 		DistributionType.UNIFORM:
 			return _rng.randf_range(_param_uniform_a, _param_uniform_b)
 		DistributionType.NORMAL:
 			return _rng.randfn(_param_normal_mean, _param_normal_std_dev)
 		DistributionType.BERNOULLI:
-			return 1.0 if _rng.randf() < _param_bernoulli_p else 0.0
+			# Using ProbabilityServer: randi_bernoulli(p) returns int (0 or 1)
+			return float(ProbabilityServer.randi_bernoulli(_param_bernoulli_p))
 		DistributionType.BINOMIAL:
-			var successes: int = 0
-			for _i in range(_param_binomial_n):
-				if _rng.randf() < _param_binomial_p:
-					successes += 1
-			return float(successes)
+			# Using ProbabilityServer: randi_binomial(p, n) returns int
+			return float(ProbabilityServer.randi_binomial(_param_binomial_p, _param_binomial_n))
 		DistributionType.POISSON:
-			# Knuth's algorithm for Poisson distribution
-			if _param_poisson_lambda <= 0: return 0.0
-			var l: float = exp(-_param_poisson_lambda)
-			var k: int = 0
-			var p: float = 1.0
-			while true:
-				k += 1
-				p *= _rng.randf()
-				if p <= l:
-					break
-			return float(k - 1)
+			# Using ProbabilityServer: randi_poisson(lambda) returns int
+			return float(ProbabilityServer.randi_poisson(_param_poisson_lambda))
 		DistributionType.EXPONENTIAL:
-			# Godot's randf_exp takes lambda (rate) directly.
-			# Mean = 1/lambda. If _param_exponential_lambda is a mean, convert to rate.
-			# Assuming _param_exponential_lambda IS the rate as per Godot's expectation.
-			return _rng.randf_exp(_param_exponential_lambda)
+			# Using ProbabilityServer: randf_exponential(lambda) returns float
+			return ProbabilityServer.randf_exponential(_param_exponential_lambda)
 		DistributionType.HISTOGRAM:
-			if _param_hist_values.is_empty() or _param_hist_cumulative_probs.is_empty():
-				push_warning("InVar '%s' (HISTOGRAM): Attempted to sample from uninitialized/invalid histogram. Returning 0.0." % name)
+			# Using ProbabilityServer: randv_histogram(values_packed_float_array, probabilities_packed_float_array)
+			# ProbabilityServer.randv_histogram returns a Variant, which should be a float here as _param_hist_values are floats.
+			if _param_hist_values.is_empty() or _gdstats_hist_probs_param.is_empty() or _param_hist_values.size() != _gdstats_hist_probs_param.size():
+				push_warning("InVar '%s' (HISTOGRAM with ProbabilityServer): Invalid cached parameters. Values size: %d, Probs size: %d. Returning 0.0." % [name, _param_hist_values.size(), _gdstats_hist_probs_param.size()])
 				return 0.0
-			var r: float = _rng.randf()
-			for i in range(_param_hist_cumulative_probs.size()):
-				if r <= _param_hist_cumulative_probs[i]:
-					return _param_hist_values[i]
-			return _param_hist_values[_param_hist_values.size() - 1] # Should not happen if probs sum to 1
+			return float(ProbabilityServer.randv_histogram(_param_hist_values, _gdstats_hist_probs_param))
 		DistributionType.CUSTOM:
 			if _custom_map_keys_as_float_array.is_empty():
 				push_error("InVar '%s' (CUSTOM): Cannot generate value, _custom_map_keys_as_float_array is empty. This means num_map had no numeric keys." % name)

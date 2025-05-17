@@ -352,15 +352,23 @@ func run_simulation(
 	_actual_total_cases_processed_so_far = 0
 	_simulation_start_time_msec = Time.get_ticks_msec()
 	
-	# Generate Run ID (4-char alphanumeric)
-	var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-	run_id = ""
+	# Generate Run ID in HH:MM_XXXX format
+	var time_dict = Time.get_time_dict_from_system()
+	var time_str = "%02d:%02d" % [time_dict.hour, time_dict.minute]
+	
+	var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789" # Removed lowercase for brevity if desired, or keep full
+	var random_code = ""
 	for _i in range(4):
-		run_id += chars[randi() % chars.length()]
-	run_id += "_" + str(Time.get_ticks_msec() % 1000) # Add some timestamp to make it more unique quickly
+		random_code += chars[randi() % chars.length()]
+	
+	run_id = "%s_%s" % [time_str, random_code]
 
-	Logger.info("SimManager: Simulation run '%s' starting. N_Cases: %d, Threads: %s, BatchSize: %d, OutputAsDF: %s" % [
-		run_id, self.n_cases, str(self.max_threads) if self.max_threads > 0 else "All", self.batch_size, str(self.output_as_dataframe)
+	Logger.info("SimManager: Simulation run '%s' starting. N_Cases: %s, Threads: %s, BatchSize: %s, OutputAsDF: %s" % [
+		run_id, 
+		Logger._format_int_with_underscores(self.n_cases), 
+		str(self.max_threads) if self.max_threads > 0 else "All", 
+		Logger._format_int_with_underscores(self.batch_size),
+		str(self.output_as_dataframe)
 	])
 	emit_signal("simulation_started", run_id)
 

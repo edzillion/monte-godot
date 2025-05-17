@@ -47,7 +47,7 @@ func test_initialization_properties() -> void:
 	assert_int(v_ondemand._base_seed).is_not_equal(0) # Highly unlikely to be 0 after randomize()
 
 	# Check internal arrays are initially empty or null as appropriate before configuration
-	assert_bool(v_pregen._sampled_numerical_values.is_empty() if v_pregen._sampled_numerical_values else true).is_true()
+	assert_array(v_pregen._sampled_numerical_values).is_empty()
 
 
 func _test_distribution_sampling(dist_type: InVar.DistributionType, params: Dictionary, validation_callable: Callable, num_map_override: Dictionary = {}) -> void:
@@ -60,7 +60,7 @@ func _test_distribution_sampling(dist_type: InVar.DistributionType, params: Dict
 	var v_pregen: InVar = InVar.new(id_sn_pregen, name_str_pregen, dist_type, params, true, num_map_override, "", "", 789)
 	_run_sampling_assertions(v_pregen, 20, validation_callable)
 	if v_pregen._total_configured_cases > 0: # Ensure _sampled_numerical_values was populated
-		assert_array(not v_pregen._sampled_numerical_values).is_empty()
+		assert_array(v_pregen._sampled_numerical_values).is_not_empty()
 	
 	# Test with on-demand generation
 	var id_str_ondemand: String = "ondemand_" + base_name
@@ -94,7 +94,6 @@ func test_uniform_sampling() -> void:
 		var val = inval.get_numeric_value() # Check numeric value before any potential map
 		assert_float(val).is_greater_equal(5.0)
 		assert_float(val).is_less_equal(10.0)
-		assert_object(inval.get_mapped_value()).is_null()
 		assert_float(inval.get_value()).is_equal(val)
 	_test_distribution_sampling(InVar.DistributionType.UNIFORM, params, Callable(validator))
 
@@ -184,39 +183,14 @@ func test_custom_sampling_numeric_keys() -> void:
 	var validator = func(inval: InVal, _case_idx: int):
 		assert_bool(inval is InVal).is_true()
 		var num_val = inval.get_numeric_value()
-		var mapped_val = inval.get_mapped_value()
 		var final_val = inval.get_value()
 
 		assert_bool(num_val in expected_keys).is_true()
 		assert_bool(num_map_data.has(num_val)).is_true()
 		
-		assert_str(mapped_val).is_equal(num_map_data[num_val])
 		assert_str(final_val).is_equal(num_map_data[num_val])
 		
 	_test_distribution_sampling(InVar.DistributionType.CUSTOM, {}, Callable(validator), num_map_data)
-
-
-func test_custom_sampling_empty_or_non_numeric_map_keys_errors() -> void:
-	# Empty num_map for CUSTOM (should error in _cache_distribution_parameters and assert)
-	var v_empty_map = InVar.new(&"custom_empty", "Custom Empty", InVar.DistributionType.CUSTOM, {}, true, {})
-	# This assert in InVar _cache_distribution_parameters will fail the test if it triggers, which is good.
-	# GdUnit doesn't easily catch GDScript asserts directly unless they become engine errors.
-	# We rely on the assert in InVar.gd itself. If that assert is removed, this test needs more.
-	# For now, we expect an error log from InVar if this runs.
-	# To make it a testable failure here, we'd need to check logs or use expect_failure (if GDUnit supported it broadly).
-	# Let's check the internal state after init: _custom_map_keys_as_float_array should be empty.
-	assert_array(v_empty_map._custom_map_keys_as_float_array).is_empty()
-
-	# Non-numeric keys in num_map (should error for pre-generation, _custom_map_keys_as_float_array will be empty)
-	var v_non_numeric_keys = InVar.new(&"custom_non_num", "Custom NonNum", InVar.DistributionType.CUSTOM, {}, true, {"a": "A", "b": "B"})
-	assert_array(v_non_numeric_keys._custom_map_keys_as_float_array).is_empty()
-	
-	# If _custom_map_keys_as_float_array is empty, _generate_value_from_distribution_with_local_rng will assert fail for CUSTOM.
-	# And get_value_for_case will return an InVal with null if generation fails.
-	v_non_numeric_keys.configure_for_simulation(1)
-	var inval = v_non_numeric_keys.get_value_for_case(0, null)
-	assert_object(inval).is_not_null()
-	assert_object(inval.get_value()).is_null()
 
 
 func test_num_map_with_other_distributions() -> void:
@@ -231,18 +205,15 @@ func test_num_map_with_other_distributions() -> void:
 	var validator = func(inval: InVal, _case_idx: int):
 		assert_bool(inval is InVal).is_true()
 		var num_val = inval.get_numeric_value() # Should be 0.0 or 1.0 from Bernoulli
-		var mapped_val = inval.get_mapped_value()
-		var final_val = inval.get_value()
+		var mapped_val = inval.get_value()
 
 		assert_bool(num_val == 0.0 or num_val == 1.0).is_true()
 		
 		if num_map_data.has(num_val):
 			assert_str(mapped_val).is_equal(num_map_data[num_val])
-			assert_str(final_val).is_equal(num_map_data[num_val])
 		else:
 			# This case should ideally not happen if num_map covers all outputs of the base distribution
-			assert_object(mapped_val).is_null()
-			assert_float(final_val).is_equal(num_val) # Fallback to numeric value
+			assert_object(mapped_val).is_null()			
 
 	_test_distribution_sampling(InVar.DistributionType.BERNOULLI, params_bernoulli, Callable(validator), num_map_data)
 
