@@ -58,7 +58,7 @@ func test_configure_simulation() -> void:
 	var outvar1 = OutVar.new(&"out1", "Output1")
 
 	sim_model.configure_simulation(
-		100, preprocess_func, run_func, postprocess_func, [invar1], [outvar1], 4, true
+		100, preprocess_func, run_func, postprocess_func, 4, 1000, [invar1], [outvar1], true
 	)
 	
 	# mock_sim_manager is the one passed to SimModel constructor, so SimModel holds the reference.
@@ -79,7 +79,7 @@ func test_run_simulation() -> void:
 	var run_func: Callable = func(_inputs): return null
 	var postprocess_func: Callable = func(_case, _outputs): pass
 	sim_model.configure_simulation(
-		10, preprocess_func, run_func, postprocess_func, [], [], 0, false
+		10, preprocess_func, run_func, postprocess_func, 0, 1000, [], [], false
 	)
 
 	var result: bool = sim_model.run_simulation()
