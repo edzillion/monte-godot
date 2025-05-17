@@ -1,126 +1,209 @@
 # res://examples/estimate_pi.gd
 extends Node
 
-# References to our core library classes
-# These might need to be preloaded if not using class_name directly in some contexts,
-# but with autoloads and class_name, direct instantiation should work once Godot parses.
-# const SimManager = preload("res://src/managers/sim_manager.gd") # Not needed if SimManager is a node in scene or autoloaded
+# Preload necessary classes if not relying on class_name global resolution entirely
+# (though class_name should make them globally available)
+# const SimManager = preload("res://src/managers/sim_manager.gd") # No longer directly used
+const Model = preload("res://src/core/sim_model.gd")
+const InVar = preload("res://src/core/in_var.gd")
+const OutVar = preload("res://src/core/out_var.gd")
+# const Case = preload("res://src/core/case.gd") # Not directly instantiated here
+# const InVal = preload("res://src/core/in_val.gd") # Handled by InVar/Case
+const OutVal = preload("res://src/core/out_val.gd")
+const EasyChartsDataFrame = preload("res://addons/easy_charts/utilities/classes/structures/data_frame.gd") # For type checking results
 
-# InVar and InVal might not be strictly needed for this simple Pi example if run uses case seed
+var N_CASES: int = 100000
+var OUTPUT_DATAFRAME: bool = false # Set to true to test DataFrame output
+var _logger_instance = null # To store logger instance
 
-var sim_manager: SimManager
-var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+var pi_model: Model
 
-# --- Simulation Functions ---
-
-# Preprocess: Takes a Case object, returns arguments for the run function.
-# For this Pi example, the run function only needs the case's seed for its RNG.
-func _preprocess_pi(current_case: Case) -> int:
-	# if local_logger: local_logger.debug("Preprocessing Case: %d" % current_case.case_id)
-	return current_case.seed
-
-
-# Run: Simulates one point, returns true if in circle, false otherwise.
-# Takes the seed from preprocess to initialize its own RNG for repeatability.
-func _run_pi(case_seed: int) -> bool:
-	var case_rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	case_rng.seed = case_seed
-	var x: float = case_rng.randf()
-	var y: float = case_rng.randf()
-	# if local_logger: local_logger.debug("Run Case with seed %d: (x=%f, y=%f)" % [case_seed, x,y])
-	return (x*x + y*y) <= 1.0 # Check if point is within the unit circle
-
-
-# Postprocess: Takes the Case and run output, logs the result to the Case.
-func _postprocess_pi(current_case: Case, is_in_circle: bool) -> void:
-	# if local_logger: local_logger.debug("Postprocessing Case: %d, InCircle: %s" % [current_case.case_id, is_in_circle])
-	var result_val: OutVal = OutVal.new(1.0 if is_in_circle else 0.0) # Store 1 for in, 0 for out
-	current_case.add_output_value(&"is_in_circle", result_val)
-
-
-# --- Simulation Setup and Execution ---
 
 func _ready() -> void:
-	if Logger:
-		Logger.info("EstimatePi: Script started. Logger instance obtained.")
+	if Engine.has_singleton("Logger"):
+		_logger_instance = Engine.get_singleton("Logger")
+		_logger_instance.min_log_level = Logger.LogLevel.INFO # Set desired log level
+	else:
+		print("EstimatePi: Logger not found. Autoload might not be configured.")
 
-	# Instantiate SimManager (assuming it's added to the scene or also autoloaded)
-	# If SimManager is autoloaded: sim_manager = SimManager
-	# If it needs to be instantiated as a child node:
-	sim_manager = SimManager.new()
-	add_child(sim_manager)
-	sim_manager.name = "PiSimManager"
+	# 1. Create a Model instance
+	pi_model = Model.new("PiEstimationModel", "Estimates Pi using Monte Carlo")
+	
+	# Ensure SimManager (created by Model) is added to the tree if it's a Node and needs processing.
+	# Model.get_sim_manager() gives access to the SimManager instance.
+	var sm = pi_model.get_sim_manager()
+	if sm and sm is Node and not sm.is_inside_tree():
+		add_child(sm)
+		sm.name = "PiEstimationSimManager" # Optional: give it a name in the tree
+		_log_info("Added SimManager from Model to the scene tree.")
 
-	# 1. Configure SimManager
-	sim_manager.n_cases = 10000 # Number of points to simulate
+	# 2. Define InVars and OutVars
+	var x_coord: InVar = InVar.new(&"x", "X Coordinate", InVar.DistributionType.UNIFORM, {"a": -1.0, "b": 1.0})
+	var y_coord: InVar = InVar.new(&"y", "Y Coordinate", InVar.DistributionType.UNIFORM, {"a": -1.0, "b": 1.0})
+	
+	var is_inside_circle: OutVar = OutVar.new(&"inside_circle", "Is Point Inside Circle")
 
-	# 2. Define Output Variable
-	var ov_is_in_circle: OutVar = OutVar.new(&"is_in_circle", "Point in Circle?", "1 if in unit circle, 0 otherwise")
-	sim_manager.add_output_variable(ov_is_in_circle)
-
-	# (Input Variables are not strictly necessary for this basic Pi example
-	# as randomness is self-contained in _run_pi using the case seed)
-
-	# 3. Set simulation functions
-	sim_manager.set_simulation_functions(
+	# 3. Configure the simulation via the Model
+	pi_model.configure_simulation(
+		N_CASES,
 		Callable(self, "_preprocess_pi"),
 		Callable(self, "_run_pi"),
-		Callable(self, "_postprocess_pi")
+		Callable(self, "_postprocess_pi"),
+		[x_coord, y_coord], # Input Variables
+		[is_inside_circle], # Output Variables
+		0, # max_threads (0 for default)
+		OUTPUT_DATAFRAME # output_as_dataframe
 	)
 
-	# 4. Connect to simulation completion signal
-	sim_manager.simulation_completed.connect(Callable(self, "_on_simulation_completed"))
-	sim_manager.simulation_progress.connect(Callable(self, "_on_simulation_progress"))
-	sim_manager.simulation_error.connect(Callable(self, "_on_simulation_error"))
+	# 4. Connect to the Model's signals
+	pi_model.model_simulation_completed.connect(_on_model_simulation_completed)
+	pi_model.model_simulation_progress.connect(_on_model_simulation_progress)
+	pi_model.model_simulation_error.connect(_on_model_simulation_error)
+	_log_info("Connected to Model signals.")
 
 	# 5. Run the simulation
-	if Logger:
-		Logger.info("EstimatePi: Starting Pi estimation simulation...")
-	sim_manager.run_simulation()
+	_log_info("Starting Pi estimation model run...")
+	if not pi_model.run_simulation():
+		_log_error("Failed to start Pi estimation model run.")
 
 
-func _on_simulation_progress(progress_percentage: float) -> void:
-	if Logger:
-		Logger.info("EstimatePi: Simulation progress: %.2f%%" % progress_percentage)
+func _preprocess_pi(case_obj: Case) -> Array:
+	var x: float = case_obj.get_input_value(&"x").get_value()
+	var y: float = case_obj.get_input_value(&"y").get_value()
+	return [x, y]
 
 
-func _on_simulation_error(error_message: String) -> void:
-	if Logger:
-		Logger.error("EstimatePi: Simulation error: %s" % error_message)
+func _run_pi(x: float, y: float) -> bool:
+	# Check if the point (x, y) is inside the unit circle (x^2 + y^2 <= 1)
+	return (x*x + y*y) <= 1.0
 
 
-func _on_simulation_completed(results: Array) -> void:
-	if Logger:
-		Logger.info("EstimatePi: Simulation completed. Processing results...")
+func _postprocess_pi(case_obj: Case, is_inside: bool) -> void:
+	var result_val: int = 1 if is_inside else 0
+	case_obj.add_output_value(&"inside_circle", OutVal.new(result_val))
 
-	if results.is_empty():
-		if Logger:
-			Logger.warning("EstimatePi: No results returned from simulation.")
+
+func _on_model_simulation_completed(_results_param: Variant) -> void:
+	_log_info("Pi estimation MODEL simulation completed!")
+	
+	var actual_results: Variant = pi_model.get_results() # Use Model's method to get results
+
+	if actual_results == null:
+		_log_error("Model returned null results despite completion signal.")
+		_cleanup_after_run()
 		return
 
-	var points_in_circle: int = 0
-	var total_points: int = results.size()
+	if actual_results is EasyChartsDataFrame:
+		var df = actual_results as EasyChartsDataFrame
+		_log_info("Results are DataFrame with %d rows, %d columns. Name: %s" % [df.row_count(), df.column_count(), df.name])
+		# For DataFrame, we need to parse it to get the 'is_inside_circle' data.
+		# This example assumes the column is named "inside_circle" as per OutVar ID.
+		var inside_circle_col_name: String = "inside_circle"
+		if df.has_column(inside_circle_col_name):
+			var inside_circle_data: Array = df.get_column_data(inside_circle_col_name)
+			var inside_circle_count: int = 0
+			for val in inside_circle_data:
+				if val == 1:
+					inside_circle_count += 1
+			
+			if df.row_count() > 0:
+				var estimated_pi: float = 4.0 * float(inside_circle_count) / float(df.row_count())
+				_print_pi_results(df.row_count(), inside_circle_count, estimated_pi)
+			else:
+				_log_warning("DataFrame has no rows, cannot estimate Pi.")
+		else:
+			_log_error("DataFrame does not contain expected column: '%s'" % inside_circle_col_name)
+		_cleanup_after_run()
+		return
+	
+	if actual_results is Array[Case]:
+		var cases_array: Array[Case] = actual_results
+		var inside_circle_count: int = 0
+		for case_obj in cases_array:
+			var out_val: OutVal = case_obj.get_output_value(&"inside_circle")
+			if out_val and out_val.get_value() == 1:
+				inside_circle_count += 1
+		
+		if cases_array.size() > 0:
+			var estimated_pi: float = 4.0 * float(inside_circle_count) / float(cases_array.size())
+			_print_pi_results(cases_array.size(), inside_circle_count, estimated_pi)
+		else:
+			_log_warning("No cases were processed, cannot estimate Pi.")
+		_cleanup_after_run()
+		return
 
-	for case_result in results:
-		if not case_result is Case:
-			if Logger:
-				Logger.warning("EstimatePi: Result item is not a Case object.")
-			continue
+	_log_error("Results are in an unexpected format. Type: %s" % typeof(actual_results))
+	_cleanup_after_run()
 
-		var out_val: OutVal = case_result.get_output_value(&"is_in_circle")
-		if out_val and out_val.get_value() == 1.0:
-			points_in_circle += 1
 
-	if total_points > 0:
-		var pi_estimate: float = 4.0 * (float(points_in_circle) / float(total_points))
-		if Logger:
-			Logger.info("EstimatePi: Total points simulated: %d" % total_points)
-			Logger.info("EstimatePi: Points in circle: %d" % points_in_circle)
-			Logger.info("EstimatePi: Estimated value of Pi: %f" % pi_estimate)
-		print("Estimated Pi: %f" % pi_estimate) # Always print final estimate
+func _print_pi_results(total_cases: int, inside_count: int, pi_val: float) -> void:
+	var msg_title = "--- Pi Estimation Results (%s) ---" % ("DataFrame" if OUTPUT_DATAFRAME else "Array[Case]")
+	var msg_total = "Total cases: %d" % total_cases
+	var msg_inside = "Points inside circle: %d" % inside_count
+	var msg_pi = "Estimated Pi: %f" % pi_val
+	
+	_log_info(msg_title)
+	_log_info(msg_total)
+	_log_info(msg_inside)
+	_log_info(msg_pi)
+	
+	print(msg_title)
+	print(msg_total)
+	print(msg_inside)
+	print(msg_pi)
+	print("-------------------------------------")
+
+
+func _on_model_simulation_progress(progress: float) -> void:
+	if _logger_instance:
+		_logger_instance.debug("Pi Model Progress: %.2f %%" % progress)
 	else:
-		if Logger:
-			Logger.warning("EstimatePi: Total points simulated was zero, cannot estimate Pi.")
+		print("Pi Model Progress: %.2f %%" % progress)
 
-	# Optional: Clean up SimManager if it was dynamically added and is no longer needed
-	# sim_manager.queue_free() 
+
+func _on_model_simulation_error(error_message: String) -> void:
+	_log_error("Pi Model Simulation Error: %s" % error_message)
+	_cleanup_after_run()
+
+
+func _cleanup_after_run() -> void:
+	# Clean up the Model and its SimManager
+	# If SimManager was added as a child to this node, queue_free it.
+	if pi_model:
+		var sm = pi_model.get_sim_manager()
+		if sm and sm is Node and sm.get_parent() == self:
+			sm.queue_free()
+			_log_info("Queued SimManager for freeing.")
+		# Model can call a method to free its SimManager if it exclusively owns it and it wasn't parented elsewhere
+		# pi_model.free_sim_manager_if_owned() # Use this if Model was responsible for a non-parented SM
+		pi_model.free() # Free the RefCounted Model instance
+		pi_model = null
+	_log_info("Cleanup after run completed.")
+
+
+# Logger helper methods
+func _log_info(message: String) -> void:
+	if _logger_instance:
+		_logger_instance.info("EstimatePi: " + message)
+	else:
+		print("[INFO] EstimatePi: " + message)
+
+func _log_warning(message: String) -> void:
+	if _logger_instance:
+		_logger_instance.warning("EstimatePi: " + message)
+	else:
+		push_warning("EstimatePi: " + message)
+
+func _log_error(message: String) -> void:
+	if _logger_instance:
+		_logger_instance.error("EstimatePi: " + message)
+	else:
+		push_error("EstimatePi: " + message)
+
+# Removed _exit_tree to ensure SimManager is handled in completion/error callbacks
+# func _exit_tree() -> void:
+# 	# Ensure SimManager is freed if it was added as a child
+# 	if pi_model and pi_model.sim_manager and pi_model.sim_manager.get_parent() == self:
+# 		pi_model.sim_manager.queue_free()
+# 	if pi_model:
+# 		pi_model.free() # Free the RefCounted Model instance
