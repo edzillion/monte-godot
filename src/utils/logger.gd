@@ -24,6 +24,62 @@ var main_thread_buffer: Array[Dictionary] = [] # For logs from the main thread
 var buffer_mutex: Mutex = Mutex.new()
 #endregion
 
+#region Number Formatting Utilities
+static func _format_int_with_underscores(num: int) -> String:
+	var s_num = str(num)
+	if num < 0:
+		return "-" + _format_positive_int_string_with_underscores(s_num.substr(1))
+	return _format_positive_int_string_with_underscores(s_num)
+
+static func _format_positive_int_string_with_underscores(s_num: String) -> String:
+	var length = s_num.length()
+	if length <= 3:
+		return s_num
+	var result = ""
+	var first_segment_len = length % 3
+	if first_segment_len == 0:
+		first_segment_len = 3
+
+	result = s_num.substr(0, first_segment_len)
+	var current_pos = first_segment_len
+	while current_pos < length:
+		result += "_" + s_num.substr(current_pos, 3)
+		current_pos += 3
+	return result
+
+static func _format_float_with_underscores(num: float, precision: int = -1) -> String:
+	var s_num = str(num) # Let Godot handle basic float to string with its precision
+	# If specific precision is requested, format with it.
+	if precision >= 0:
+		s_num = "%.*f" % [precision, num]
+	
+	var parts = s_num.split(".")
+	var integer_part_str = parts[0]
+	var formatted_integer_part = _format_int_with_underscores(int(integer_part_str)) # Potential conversion error if integer_part is huge
+	
+	if parts.size() > 1:
+		var decimal_part_str = parts[1]
+		return formatted_integer_part + "." + decimal_part_str
+	else:
+		return formatted_integer_part
+
+static func _format_arg_for_display(arg_val) -> String:
+	if arg_val is int:
+		if abs(arg_val) >= 1000: # Threshold for formatting
+			return _format_int_with_underscores(arg_val)
+		return str(arg_val)
+	elif arg_val is float:
+		# Check if the integer part is large enough for formatting
+		var int_part = int(arg_val)
+		if abs(int_part) >= 1000:
+			return _format_float_with_underscores(arg_val) # Default precision
+		return str(arg_val)
+	elif arg_val is String:
+		return arg_val # Already a string
+	else:
+		return str(arg_val) # Fallback for other types
+
+#endregion
 
 #region Static Methods (Convenience wrappers if Autoloaded)
 static func debug(message: String, context: Dictionary = {}) -> void:
@@ -81,9 +137,16 @@ func log_message(level: LogLevel, message: String, context: Dictionary = {}) -> 
 func _immediate_print(log_entry: Dictionary) -> void:
 	var level_str: String = log_entry["level"]
 	var msg_str: String = log_entry["message"]
-	var context_str: String = "" # TODO: Format context dictionary
-	if not log_entry["context"].is_empty():
-		context_str = " | Context: %s" % str(log_entry["context"])
+	var context_items: Array[String] = []
+	var original_context: Dictionary = log_entry["context"]
+	if not original_context.is_empty():
+		for key in original_context.keys():
+			var value = original_context[key]
+			context_items.append("%s: %s" % [str(key), _format_arg_for_display(value)])
+	
+	var context_str: String = ""
+	if not context_items.is_empty():
+		context_str = " | Context: {%s}" % ", ".join(context_items)
 
 	var formatted_message: String = "[%s] [%s] (Thread: %s) %s%s" % [
 		log_entry["timestamp"],
