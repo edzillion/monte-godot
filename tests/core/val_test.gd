@@ -33,3 +33,4 @@ func test_get_value_prefers_mapped_value() -> void:
 	assert_str(v.get_value()).is_equal("special")
 	v = OutVal.new(0, "zero")
 	assert_str(v.get_value()).is_equal("zero") 
+ 

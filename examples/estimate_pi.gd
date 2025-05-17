@@ -5,12 +5,10 @@ extends Node
 # These might need to be preloaded if not using class_name directly in some contexts,
 # but with autoloads and class_name, direct instantiation should work once Godot parses.
 # const SimManager = preload("res://src/managers/sim_manager.gd") # Not needed if SimManager is a node in scene or autoloaded
-const OutVar = preload("res://src/core/out_var.gd")
-const OutVal = preload("res://src/core/out_val.gd")
+
 # InVar and InVal might not be strictly needed for this simple Pi example if run uses case seed
 
 var sim_manager: SimManager
-var local_logger: Node # Will hold the Logger singleton instance
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 
 # --- Simulation Functions ---
@@ -43,11 +41,8 @@ func _postprocess_pi(current_case: Case, is_in_circle: bool) -> void:
 # --- Simulation Setup and Execution ---
 
 func _ready() -> void:
-	if Engine.has_singleton("Logger"):
-		local_logger = Engine.get_singleton("Logger")
-		local_logger.info("EstimatePi: Script started. Logger instance obtained.")
-	else:
-		print("EstimatePi: Logger singleton not found. Logging will be to console.")
+	if Logger:
+		Logger.info("EstimatePi: Script started. Logger instance obtained.")
 
 	# Instantiate SimManager (assuming it's added to the scene or also autoloaded)
 	# If SimManager is autoloaded: sim_manager = SimManager
@@ -79,38 +74,28 @@ func _ready() -> void:
 	sim_manager.simulation_error.connect(Callable(self, "_on_simulation_error"))
 
 	# 5. Run the simulation
-	if local_logger:
-		local_logger.info("EstimatePi: Starting Pi estimation simulation...")
-	else:
-		print("EstimatePi: Starting Pi estimation simulation... (no logger)")
+	if Logger:
+		Logger.info("EstimatePi: Starting Pi estimation simulation...")
 	sim_manager.run_simulation()
 
 
 func _on_simulation_progress(progress_percentage: float) -> void:
-	if local_logger:
-		local_logger.info("EstimatePi: Simulation progress: %.2f%%" % progress_percentage)
-	else:
-		print("EstimatePi: Simulation progress: %.2f%% (no logger)" % progress_percentage)
+	if Logger:
+		Logger.info("EstimatePi: Simulation progress: %.2f%%" % progress_percentage)
 
 
 func _on_simulation_error(error_message: String) -> void:
-	if local_logger:
-		local_logger.error("EstimatePi: Simulation error: %s" % error_message)
-	else:
-		print("EstimatePi: Simulation error: %s (no logger)" % error_message)
+	if Logger:
+		Logger.error("EstimatePi: Simulation error: %s" % error_message)
 
 
 func _on_simulation_completed(results: Array) -> void:
-	if local_logger:
-		local_logger.info("EstimatePi: Simulation completed. Processing results...")
-	else:
-		print("EstimatePi: Simulation completed. Processing results... (no logger)")
+	if Logger:
+		Logger.info("EstimatePi: Simulation completed. Processing results...")
 
 	if results.is_empty():
-		if local_logger:
-			local_logger.warning("EstimatePi: No results returned from simulation.")
-		else:
-			print("EstimatePi: No results returned from simulation. (no logger)")
+		if Logger:
+			Logger.warning("EstimatePi: No results returned from simulation.")
 		return
 
 	var points_in_circle: int = 0
@@ -118,10 +103,8 @@ func _on_simulation_completed(results: Array) -> void:
 
 	for case_result in results:
 		if not case_result is Case:
-			if local_logger:
-				local_logger.warning("EstimatePi: Result item is not a Case object.")
-			else:
-				print("EstimatePi: Result item is not a Case object. (no logger)")
+			if Logger:
+				Logger.warning("EstimatePi: Result item is not a Case object.")
 			continue
 
 		var out_val: OutVal = case_result.get_output_value(&"is_in_circle")
@@ -130,20 +113,14 @@ func _on_simulation_completed(results: Array) -> void:
 
 	if total_points > 0:
 		var pi_estimate: float = 4.0 * (float(points_in_circle) / float(total_points))
-		if local_logger:
-			local_logger.info("EstimatePi: Total points simulated: %d" % total_points)
-			local_logger.info("EstimatePi: Points in circle: %d" % points_in_circle)
-			local_logger.info("EstimatePi: Estimated value of Pi: %f" % pi_estimate)
-		else:
-			print("EstimatePi: Total points simulated: %d (no logger)" % total_points)
-			print("EstimatePi: Points in circle: %d (no logger)" % points_in_circle)
-			print("EstimatePi: Estimated value of Pi: %f (no logger)" % pi_estimate)
+		if Logger:
+			Logger.info("EstimatePi: Total points simulated: %d" % total_points)
+			Logger.info("EstimatePi: Points in circle: %d" % points_in_circle)
+			Logger.info("EstimatePi: Estimated value of Pi: %f" % pi_estimate)
 		print("Estimated Pi: %f" % pi_estimate) # Always print final estimate
 	else:
-		if local_logger:
-			local_logger.warning("EstimatePi: Total points simulated was zero, cannot estimate Pi.")
-		else:
-			print("EstimatePi: Total points simulated was zero, cannot estimate Pi. (no logger)")
+		if Logger:
+			Logger.warning("EstimatePi: Total points simulated was zero, cannot estimate Pi.")
 
 	# Optional: Clean up SimManager if it was dynamically added and is no longer needed
 	# sim_manager.queue_free() 
