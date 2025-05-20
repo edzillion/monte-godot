@@ -1,41 +1,39 @@
-class_name EstimatePi extends Node
+class_name PokerHands extends Node
 var _rng: RandomNumberGenerator
 
 const TOTAL_CASES: int = 10_000_000 # Reduced for quicker testing of stats, was 100M
 const SUPER_BATCH_SIZE: int = 1_000_000 # Was 5M
 const INNER_BATCH_SIZE: int = 100_000 # Batch size for BatchProcessor's internal threading
 
-var monte_godot: MonteGodot
-var estimate_pi_job = preload("res://examples/estimate_pi/estimate_pi_job.tres")
+var monte_carlo: MonteCarlo
+var poker_hands_job = preload("res://examples/poker_hands/poker_hands_job.tres")
 
 func _ready():
-	monte_godot = MonteGodot.new()
-	monte_godot.all_jobs_completed.connect(_final_post_process)
+	monte_carlo = MonteCarlo.new()
+	monte_carlo.all_jobs_completed.connect(_final_post_process)
 	
 	_rng = RandomNumberGenerator.new()
 	var num_super_batches: int = int(ceil(float(TOTAL_CASES) / SUPER_BATCH_SIZE))
 	print("Starting Pi estimation for %d total cases, in %d super-batches of size up to %d." % [TOTAL_CASES, num_super_batches, SUPER_BATCH_SIZE])
-	
-	
 	_start_simulation()
 
 func _start_simulation():
 	estimate_pi_job.preprocess_callable = _estimate_pi_preprocess
 	estimate_pi_job.run_callable = _estimate_pi_run
 	estimate_pi_job.postprocess_callable = _estimate_pi_postprocess
-	monte_godot.run_simulations([estimate_pi_job])
+	monte_carlo.run_simulations([estimate_pi_job])
 	
 
-func _estimate_pi_preprocess(case:Case) -> Dictionary:
+func _estimate_pi_preprocess(_case) -> Dictionary:
 	var task_data: Dictionary	
-	task_data.x = case.input_values[0]
-	task_data.y = case.input_values[1]
+	task_data.x = _case.input_values.x
+	task_data.y = _case.input_values.y
 	return task_data
 
 
 func _estimate_pi_run(task_data: Dictionary) -> Dictionary:
-	var x: float = task_data.x.get_value()
-	var y: float = task_data.y.get_value()
+	var x: float = task_data.x
+	var y: float = task_data.y
 	var is_inside_circle: bool = (x*x + y*y) <= 1.0
 	return {"is_inside": is_inside_circle, "x_val": x, "y_val": y}
 

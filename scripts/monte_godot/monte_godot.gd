@@ -1,5 +1,5 @@
-# src/core/monte_carlo.gd
-class_name MonteCarlo extends RefCounted
+# res://scripts/monte_godot/monte_godot.gdd
+class_name MonteGodot extends RefCounted
 
 signal job_started(job_name: String)
 ## Emitted when an individual job configuration starts processing.
@@ -16,7 +16,8 @@ signal all_jobs_completed(all_aggregated_results: Dictionary)
 
 var _batch_processor: BatchProcessor
 var _is_running_jobs: bool = false
-
+var in_vars: Dictionary = {}
+var vars: Dictionary = {}
 
 func _init() -> void:
 	_batch_processor = BatchProcessor.new()
@@ -60,6 +61,19 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			job_completed.emit(current_job_name, [], {"error": "Invalid Config"})
 			continue
 
+		# 0. Initialize Input Variables
+		var input_vars: Array[Dictionary] = job_config.in_vars
+		var in_var_idx: int = 0
+		for input_var_dict in input_vars:
+			var in_var: InVar = input_var_dict.get("distribution")
+			in_var.name = input_var_dict.name
+			in_var.ndraws = job_config.n_cases			
+			in_var.var_idx = in_var_idx
+			in_var_idx += 1
+			self.in_vars[in_var.name] = in_var
+			self.vars[in_var.name] = in_var
+			
+
 		job_started.emit(current_job_name)
 		print("MonteCarloOrchestrator: Starting job '%s' (n_cases: %d, threads: %d, super_batch_size: %d, inner_batch_size: %d)." %
 			[current_job_name, job_config.n_cases, job_config.num_threads, job_config.super_batch_size, job_config.inner_batch_size])
@@ -68,8 +82,8 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		var all_cases_for_job: Array[Case] = []
 		for i: int in range(job_config.n_cases):
 			var case_obj: Case = Case.new(i)
-			case_obj.add_input_value(&"x", randf_range(-1.0, 1.0))
-			case_obj.add_input_value(&"y", randf_range(-1.0, 1.0))
+			case_obj.add_input_value(self.in_vars["x"].get_value())
+			case_obj.add_input_value(self.in_vars["y"].get_value())
 			all_cases_for_job.append(case_obj)
 
 		if all_cases_for_job.is_empty() and job_config.n_cases > 0:

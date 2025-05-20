@@ -1,4 +1,4 @@
-# src/core/job_config.gd
+# res://scripts/job_config/job_config.gd
 class_name JobConfig extends Resource
 
 ## Stores the configuration for a single Monte Carlo simulation job.
@@ -44,6 +44,9 @@ signal configuration_changed
 			configuration_changed.emit()
 ## Number of cases grouped into an "inner batch" within a super batch.
 
+@export_group("Variables")
+@export var in_vars: Array[Dictionary] = [] # Each Dictionary: {"name": StringName, "distribution": InVar, "num_map": Dictionary, "seed": int}
+
 @export_group("User Callables")
 ## These callables define the core logic of the simulation.
 ## They need to be set programmatically.
@@ -87,6 +90,7 @@ func _init(
 	p_preprocess: Callable = Callable(),
 	p_run: Callable = Callable(),
 	p_postprocess: Callable = Callable(),
+	p_in_vars: Array[Dictionary] = [],
 	p_other_configs: Dictionary = {}
 ) -> void:
 	job_name = p_job_name
@@ -97,7 +101,41 @@ func _init(
 	preprocess_callable = p_preprocess
 	run_callable = p_run
 	postprocess_callable = p_postprocess
+	in_vars = p_in_vars
 	other_configs = p_other_configs
+
+
+func get_configured_invar_by_name(variable_name: StringName) -> InVar:
+	## Retrieves a configured InVar instance for a given variable name.
+	## Returns null if the variable_name is not found or if the configuration is invalid.
+	for var_config_dict in in_vars:
+		if var_config_dict.get("name") == variable_name:
+			var dist_source: InVar = var_config_dict.get("distribution")
+			if not dist_source:
+				push_warning("JobConfig ('%s'): No distribution source for variable '%s'." % [job_name, variable_name])
+				return null
+
+			var new_in_var: InVar = dist_source.duplicate() if dist_source else InVar.new()
+			
+			var num_map_override: Dictionary = var_config_dict.get("num_map", {})
+			if not num_map_override.is_empty():
+				new_in_var.num_map = num_map_override.duplicate(true)
+			
+			# The seed from var_config_dict.get("seed") is not directly applied to InVar.
+			# It needs to be handled by the SimManager or Case generation logic.
+			return new_in_var
+			
+	push_warning("JobConfig ('%s'): Input variable configuration for '%s' not found." % [job_name, variable_name])
+	return null
+
+
+func get_seed_for_invar(variable_name: StringName) -> int:
+	## Retrieves the seed for a given input variable configuration.
+	## Returns 0 if not found or not specified (indicating default seeding behavior).
+	for var_config_dict in in_vars:
+		if var_config_dict.get("name") == variable_name:
+			return var_config_dict.get("seed", 0) # Default to 0 if no seed key
+	return 0 # Default if variable not found
 
 
 func is_valid() -> bool:

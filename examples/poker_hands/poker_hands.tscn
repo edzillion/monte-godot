@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://bvek5nw6yfkg6"]
+
+[ext_resource type="Script" uid="uid://bw81t350bopk8" path="res://examples/poker_hands/poker_hands.gd" id="1_tas18"]
+
+[node name="PokerHands" type="Node"]
+script = ExtResource("1_tas18")

@@ -1,6 +1,7 @@
-[gd_resource type="Resource" script_class="JobConfig" load_steps=2 format=3 uid="uid://rmjfndp1yorj"]
+[gd_resource type="Resource" script_class="JobConfig" load_steps=3 format=3 uid="uid://rmjfndp1yorj"]
 
 [ext_resource type="Script" uid="uid://dhfvnpa36t4em" path="res://scripts/job_config/job_config.gd" id="1_rseo3"]
+[ext_resource type="Resource" uid="uid://dn5vsas2i5ylt" path="res://examples/estimate_pi/uniform_distrib.tres" id="1_tqfpw"]
 
 [resource]
 script = ExtResource("1_rseo3")
@@ -9,5 +10,12 @@ n_cases = 1000
 num_threads = 4
 super_batch_size = 100
 inner_batch_size = 10
+in_vars = Array[Dictionary]([{
+&"distribution": ExtResource("1_tqfpw"),
+&"name": &"x"
+}, {
+&"distribution": ExtResource("1_tqfpw"),
+&"name": &"y"
+}])
 other_configs = {}
 metadata/_custom_type_script = "uid://dhfvnpa36t4em"
