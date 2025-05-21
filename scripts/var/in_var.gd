@@ -124,10 +124,15 @@ func set_distribution_type(value: DistributionType) -> void:
 		notify_property_list_changed()
 
 func get_value() -> InVal:
-	var raw_value: float = _generate_value_from_distribution()
-	if not num_map.is_empty() and num_map.has(raw_value):
-		return InVal.new(raw_value, num_map[raw_value])
-	return InVal.new(raw_value)
+	var dist_output: Dictionary = _generate_value_from_distribution()
+	var raw_num: float = dist_output.get("num", 0.0)
+	var raw_pct: float = dist_output.get("pct", -1.0) # Default to -1.0 if not found
+	
+	var mapped_val: Variant = raw_num # Default mapped_value to raw_num
+	if not num_map.is_empty() and num_map.has(raw_num):
+		mapped_val = num_map[raw_num]
+	
+	return InVal.new(raw_num, mapped_val, raw_pct)
 
 func _update_distribution_info() -> void:
 	match distribution_type:
@@ -282,72 +287,84 @@ func _validate_property(property: Dictionary) -> void:
 			property.usage &= ~PROPERTY_USAGE_EDITOR
 
 
-func _generate_value_from_distribution() -> float:
+func _generate_value_from_distribution() -> Dictionary:
+	var pct: float = randf() # Base percentile for many distributions
+	var num: float = 0.0
+
 	match distribution_type:
 		DistributionType.UNIFORM:
-			return randf_range(uniform_a, uniform_b)
+			# Use the 'pct' to derive the number in the uniform range
+			num = uniform_a + pct * (uniform_b - uniform_a)
 		DistributionType.NORMAL:
-			return randfn(normal_mean, normal_std_dev)
+			# randfn() generates its own randomness; we can't directly inject 'pct'.
+			# The returned 'pct' here will be a new random value, not necessarily
+			# from a pre-sampled batch if that were used.
+			num = randfn(normal_mean, normal_std_dev)
+			# If we *must* associate a pct, it's a new one. The original 'pct' variable
+			# from the top of the function is suitable if we consider it the "source" for this draw attempt.
+			# No change needed to 'pct' variable itself for this case if it represents the initiating draw.
 		DistributionType.BERNOULLI:
-			if ProbabilityServer: return float(ProbabilityServer.randi_bernoulli(bernoulli_p))
-			push_warning("Bernoulli: ProbabilityServer not found. Using basic randf().")
-			return 1.0 if randf() < bernoulli_p else 0.0
+			if ProbabilityServer: num = float(ProbabilityServer.randi_bernoulli(bernoulli_p)) # Implicitly uses its own rand source
+			else:
+				push_warning("Bernoulli: ProbabilityServer not found. Using basic randf() < p.")
+				num = 1.0 if pct < bernoulli_p else 0.0 # Here, our 'pct' can be used directly
 		DistributionType.BINOMIAL:
-			if ProbabilityServer: return float(ProbabilityServer.randi_binomial(binomial_p, binomial_n))
-			push_warning("Binomial: ProbabilityServer not found.")
-			return 0.0 
+			if ProbabilityServer: num = float(ProbabilityServer.randi_binomial(binomial_p, binomial_n))
+			else: push_warning("Binomial: ProbabilityServer not found."); num = 0.0
 		DistributionType.POISSON:
-			if ProbabilityServer: return float(ProbabilityServer.randi_poisson(poisson_lambda))
-			push_warning("Poisson: ProbabilityServer not found.")
-			return 0.0
+			if ProbabilityServer: num = float(ProbabilityServer.randi_poisson(poisson_lambda))
+			else: push_warning("Poisson: ProbabilityServer not found."); num = 0.0
 		DistributionType.EXPONENTIAL:
-			if ProbabilityServer: return float(ProbabilityServer.randf_exponential(exponential_lambda))
-			push_warning("Exponential: ProbabilityServer not found.")
-			return 0.0
+			# Similar to Normal, randf_exponential uses its own source. Our 'pct' isn't directly used to get the number.
+			if ProbabilityServer: num = float(ProbabilityServer.randf_exponential(exponential_lambda))
+			else: push_warning("Exponential: ProbabilityServer not found."); num = 0.0
 		DistributionType.GEOMETRIC:
-			if ProbabilityServer: return float(ProbabilityServer.randi_geometric(geometric_p))
-			push_warning("Geometric: ProbabilityServer not found.")
-			return 0.0
+			if ProbabilityServer: num = float(ProbabilityServer.randi_geometric(geometric_p))
+			else: push_warning("Geometric: ProbabilityServer not found."); num = 0.0
 		DistributionType.ERLANG:
-			if ProbabilityServer: return float(ProbabilityServer.randf_erlang(erlang_k, erlang_lambda))
-			push_warning("Erlang: ProbabilityServer not found.")
-			return 0.0
+			if ProbabilityServer: num = float(ProbabilityServer.randf_erlang(erlang_k, erlang_lambda))
+			else: push_warning("Erlang: ProbabilityServer not found."); num = 0.0
 		DistributionType.HISTOGRAM:
 			if ProbabilityServer and not histogram_values.is_empty() and \
 			   not histogram_probabilities.is_empty() and \
 			   histogram_values.size() == histogram_probabilities.size():
-				return float(ProbabilityServer.randv_histogram(histogram_values, histogram_probabilities))
-			push_warning("Histogram: ProbabilityServer not found or params invalid/missing.")
-			return 0.0
+				# randv_histogram doesn't take a pct. It implies its own selection.
+				num = float(ProbabilityServer.randv_histogram(histogram_values, histogram_probabilities))
+			else: push_warning("Histogram: ProbabilityServer not found or params invalid/missing."); num = 0.0
 		DistributionType.PSEUDO_RANDOM:
-			if ProbabilityServer: return float(ProbabilityServer.randi_pseudo(pseudo_c))
-			push_warning("PseudoRandom: ProbabilityServer not found.")
-			return 0.0
+			if ProbabilityServer: num = float(ProbabilityServer.randi_pseudo(pseudo_c))
+			else: push_warning("PseudoRandom: ProbabilityServer not found."); num = 0.0
 		DistributionType.CUSTOM:
 			if not num_map.is_empty():
-				var keys = num_map.keys()
+				var keys: Array = num_map.keys()
 				if keys.is_empty():
-					push_error("CUSTOM: empty num_map.")
-					return 0.0
-				return float(keys[randi() % keys.size()])
+					push_error("CUSTOM InVar: num_map is empty.")
+					return {"num": 0.0, "pct": pct}
+				# Use the 'pct' to select an index from the keys
+				var random_idx: int = int(floor(pct * keys.size()))
+				random_idx = min(random_idx, keys.size() - 1) # Ensure index is within bounds
+				num = float(keys[random_idx]) # Assuming keys can be cast to float; might need adjustment
 			elif not distribution_params.is_empty() and \
 				"values" in distribution_params and "probabilities" in distribution_params:
+				# This is essentially a histogram, which doesn't directly use an input pct with ProbabilityServer
 				if ProbabilityServer:
 					var values_arr = distribution_params.get("values", [])
 					var probs_arr = distribution_params.get("probabilities", [])
 					if values_arr is Array and not values_arr.is_empty() and \
 					   probs_arr is Array and not probs_arr.is_empty() and \
 					   values_arr.size() == probs_arr.size():
-						return float(ProbabilityServer.randv_histogram(values_arr, probs_arr))
+						num = float(ProbabilityServer.randv_histogram(values_arr, probs_arr))
 					else:
-						push_error("CUSTOM (histogram-like): invalid params.")
-						return 0.0
+						push_error("CUSTOM InVar (histogram-like): invalid params.")
+						num = 0.0
 				else:
-					push_warning("CUSTOM (histogram-like): ProbabilityServer not found.")
-					return 0.0
+					push_warning("CUSTOM InVar (histogram-like): ProbabilityServer not found.")
+					num = 0.0
 			else:
-				push_error("CUSTOM: no num_map or valid histogram-like distribution_params.")
-				return 0.0
+				push_error("CUSTOM InVar: no num_map or valid histogram-like distribution_params.")
+				num = 0.0
 		_:
-			push_error("Unsupported distribution type: %s" % DistributionType.keys()[distribution_type])
-			return 0.0
+			push_error("Unsupported distribution type in InVar: %s" % DistributionType.keys()[distribution_type])
+			num = 0.0
+	
+	return {"num": num, "pct": pct}
