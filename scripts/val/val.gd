@@ -7,6 +7,8 @@ class_name Val extends RefCounted
 ## within a simulation case.
 
 #region Properties
+var name: StringName = &""
+var n_case: int = 0
 ## The raw numerical value, if applicable. Can be float, int, or other numeric types.
 var num_value: Variant 
 ## The mapped or categorical value, can be any type.
@@ -17,16 +19,22 @@ var mapped_value: Variant
 
 
 #region Initialization
-func _init(p_num_value: Variant = null, p_mapped_value: Variant = null) -> void: # p_variable_id: StringName = &""
-	if p_num_value == null:
-		num_value = null
-	elif typeof(p_num_value) == TYPE_INT or typeof(p_num_value) == TYPE_FLOAT:
-		num_value = float(p_num_value)
-	else:
-		num_value = p_num_value # For strings or other types, store as-is
-	mapped_value = p_mapped_value
-	#variable_id = p_variable_id
+func _init(p_name: StringName, p_n_case: int) -> void:
+	self.name = p_name
+	self.n_case = p_n_case	
 #endregion
+
+#region Initialization
+# func _init(p_num_value: Variant = null, p_mapped_value: Variant = null) -> void: # p_variable_id: StringName = &""
+# 	if p_num_value == null:
+# 		num_value = null
+# 	elif typeof(p_num_value) == TYPE_INT or typeof(p_num_value) == TYPE_FLOAT:
+# 		num_value = float(p_num_value)
+# 	else:
+# 		num_value = p_num_value # For strings or other types, store as-is
+# 	mapped_value = p_mapped_value
+# 	#variable_id = p_variable_id
+# #endregion
 
 
 #region Public Methods

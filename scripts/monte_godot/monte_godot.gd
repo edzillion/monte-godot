@@ -19,6 +19,9 @@ var _is_running_jobs: bool = false
 var in_vars: Dictionary = {}
 var vars: Dictionary = {}
 
+var _job_configs: Array[JobConfig] = []
+var _current_config: JobConfig = null
+
 func _init() -> void:
 	_batch_processor = BatchProcessor.new()
 
@@ -40,34 +43,34 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 	_is_running_jobs = true
 	var all_aggregated_results: Dictionary = {}
 
-	for job_config: JobConfig in p_job_configs:
+	_job_configs = p_job_configs
+
+	for job_config: JobConfig in _job_configs:
+		_current_config = job_config
 		var overall_job_start_time_msec: int = Time.get_ticks_msec()
-		var total_job_preprocess_time_msec: int = 0
-		var total_job_run_time_msec: int = 0
-		var total_job_postprocess_time_msec: int = 0
 		var num_actual_super_batches: int = 0
 
 		var current_job_name: String = "UnnamedJob"
-		if job_config:
-			current_job_name = job_config.job_name
+		if _current_config:
+			current_job_name = _current_config.job_name
 		else:
 			push_warning("MonteCarloOrchestrator: Encountered a null JobConfig. Skipping.")
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Skipped - Null JobConfig"}}
 			continue
 
-		if not job_config.is_valid():
+		if not _current_config.is_valid():
 			push_warning("MonteCarloOrchestrator: Skipping invalid JobConfig: '%s'" % current_job_name)
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Skipped - Invalid Config"}}
 			job_completed.emit(current_job_name, [], {"error": "Invalid Config"})
 			continue
 
 		# 0. Initialize Input Variables
-		var input_vars: Array[Dictionary] = job_config.in_vars
+		var input_vars: Array[Dictionary] = _current_config.in_vars
 		var in_var_idx: int = 0
 		for input_var_dict in input_vars:
 			var in_var: InVar = input_var_dict.get("distribution")
 			in_var.name = input_var_dict.name
-			in_var.ndraws = job_config.n_cases			
+			in_var.ndraws = _current_config.n_cases			
 			in_var.var_idx = in_var_idx
 			in_var_idx += 1
 			self.in_vars[in_var.name] = in_var
@@ -76,23 +79,23 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 
 		job_started.emit(current_job_name)
 		print("MonteCarloOrchestrator: Starting job '%s' (n_cases: %d, threads: %d, super_batch_size: %d, inner_batch_size: %d)." %
-			[current_job_name, job_config.n_cases, job_config.num_threads, job_config.super_batch_size, job_config.inner_batch_size])
+			[current_job_name, _current_config.n_cases, _current_config.num_threads, _current_config.super_batch_size, _current_config.inner_batch_size])
 
 		# 1. Generate All Cases for the Job (once)
 		var all_cases_for_job: Array[Case] = []
-		for i: int in range(job_config.n_cases):
+		for i: int in range(_current_config.n_cases):
 			var case_obj: Case = Case.new(i)
 			case_obj.add_input_value(self.in_vars["x"].get_value())
 			case_obj.add_input_value(self.in_vars["y"].get_value())
 			all_cases_for_job.append(case_obj)
 
-		if all_cases_for_job.is_empty() and job_config.n_cases > 0:
+		if all_cases_for_job.is_empty() and _current_config.n_cases > 0:
 			push_error("MonteCarloOrchestrator: Job '%s' - Failed to generate cases." % current_job_name)
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Case generation failed"}}
 			job_completed.emit(current_job_name, [], {"error": "Case generation failed"})
 			continue
 
-		var effective_super_batch_size: int = job_config.super_batch_size
+		var effective_super_batch_size: int = _current_config.super_batch_size
 		if effective_super_batch_size <= 0 or effective_super_batch_size > all_cases_for_job.size():
 			effective_super_batch_size = all_cases_for_job.size()
 
@@ -114,22 +117,19 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 				[current_job_name, sb_idx + 1, num_actual_super_batches, super_batch_start_idx, super_batch_end_idx -1])
 
 			# 2a. Preprocessing Stage for Super-batch
-			var sb_preprocess_start_msec: int = Time.get_ticks_msec()
-			var preprocessed_tasks_for_sb: Array = []
+			var preprocessed_cases: Array[Case] # Stores the arrays of cases for the batch processor
 			for case_obj: Case in current_super_batch_cases:
-				var preprocessed_data: Variant = job_config.preprocess_callable.call(case_obj)
-				preprocessed_tasks_for_sb.append(preprocessed_data)
-			total_job_preprocess_time_msec += Time.get_ticks_msec() - sb_preprocess_start_msec
-			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - Preprocessing complete (%d tasks)." % [current_job_name, sb_idx + 1, preprocessed_tasks_for_sb.size()])
+				var returned_case_obj: Case = preprocess_case(case_obj)
+				preprocessed_cases.append(returned_case_obj)
+			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - Preprocessing complete (%d tasks prepared for run stage)." % [current_job_name, sb_idx + 1, preprocessed_cases.size()])
 
-			# 3a. Run with BatchProcessor for Super-batch
-			var sb_run_start_msec: int = Time.get_ticks_msec()
 			var batch_processor_started: bool = _batch_processor.process(
-				preprocessed_tasks_for_sb,
-				job_config.run_callable,
-				job_config.inner_batch_size,
-				job_config.num_threads
+				preprocessed_cases, # Pass the collected arrays of arguments
+				run_case,
+				_current_config.inner_batch_size,
+				_current_config.num_threads
 			)
+			#generate_out_vars(_current_config.inner_batch_size)
 
 			if not batch_processor_started:
 				push_error("MonteCarloOrchestrator: Job '%s', Super-batch %d - Failed to start BatchProcessor." % [current_job_name, sb_idx + 1])
@@ -139,23 +139,18 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			
 			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - BatchProcessor initiated. Waiting..." % [current_job_name, sb_idx + 1])
 			var batch_run_results_for_sb: Array = await _batch_processor.processing_complete
-			total_job_run_time_msec += Time.get_ticks_msec() - sb_run_start_msec
 			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - BatchProcessor completed (%d results)." % [current_job_name, sb_idx + 1, batch_run_results_for_sb.size()])
 
 			# 4a. Postprocessing Stage for Super-batch
-			var sb_postprocess_start_msec: int = Time.get_ticks_msec()
 			if batch_run_results_for_sb.size() != current_super_batch_cases.size():
 				push_warning("MonteCarloOrchestrator: Job '%s', Super-batch %d - Mismatch in case count (%d) and batch results (%d)." %
 					[current_job_name, sb_idx + 1, current_super_batch_cases.size(), batch_run_results_for_sb.size()])
 
-			for i: int in range(current_super_batch_cases.size()):
-				if i < batch_run_results_for_sb.size():
-					var case_obj: Case = current_super_batch_cases[i]
-					var run_output: Variant = batch_run_results_for_sb[i]
-					job_config.postprocess_callable.call(case_obj, run_output)
-				else:
-					push_warning("MonteCarloOrchestrator: Job '%s', Super-batch %d - Missing batch result for case index %d (ID %s)." % [current_job_name, sb_idx + 1, i, current_super_batch_cases[i].id])
-			total_job_postprocess_time_msec += Time.get_ticks_msec() - sb_postprocess_start_msec
+
+			for case_obj: Case in current_super_batch_cases:
+				var returned_case_obj: Case = postprocess_case(case_obj)
+				collected_processed_cases.append(returned_case_obj)
+			
 			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - Postprocessing complete." % [current_job_name, sb_idx + 1])
 			
 			collected_processed_cases.append_array(current_super_batch_cases)
@@ -167,16 +162,8 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		var avg_run_sb_msec: float = 0.0
 		var avg_postprocess_sb_msec: float = 0.0
 
-		if num_actual_super_batches > 0:
-			avg_preprocess_sb_msec = float(total_job_preprocess_time_msec) / num_actual_super_batches
-			avg_run_sb_msec = float(total_job_run_time_msec) / num_actual_super_batches
-			avg_postprocess_sb_msec = float(total_job_postprocess_time_msec) / num_actual_super_batches
-
 		var job_stats: Dictionary = {
 			"total_execution_time_msec": overall_job_duration_msec,
-			"total_preprocess_time_msec": total_job_preprocess_time_msec,
-			"total_run_time_msec": total_job_run_time_msec,
-			"total_postprocess_time_msec": total_job_postprocess_time_msec,
 			"num_super_batches": num_actual_super_batches,
 			"avg_preprocess_time_per_super_batch_msec": avg_preprocess_sb_msec,
 			"avg_run_time_per_super_batch_msec": avg_run_sb_msec,
@@ -195,3 +182,61 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 	all_jobs_completed.emit(all_aggregated_results)
 	print("MonteCarloOrchestrator: All jobs completed.")
 	return OK 
+
+
+func generate_out_vars(num_cases: int, varname: StringName) -> void:
+	vals = []
+	for i in range(num_cases):
+		vals.append(self.cases[i].outvals[varname].val)
+
+	if self.cases[0].outvals[varname].valmapsource == 'auto':
+		uniquevals : set[Any] = set()
+		valmap : dict[Any, float] = None
+		for i in range(self.ncases):
+			if self.cases[i].outvals[varname].valmap is None:
+				uniquevals = None
+			else:
+				uniquevals.update(self.cases[i].outvals[varname].valmap.keys())
+		if uniquevals is not None:
+			valmap = dict()
+			for i, val in enumerate(uniquevals):
+				valmap[val] = i
+	else:
+		valmap = self.cases[0].outvals[varname].valmap
+
+	outvar = OutVar(name=varname, vals=vals, valmap=valmap,
+					ndraws=self.ndraws, seed=seed,
+					firstcaseismedian=self.firstcaseismedian,
+					datasource=datasource)
+	self.outvars[varname] = outvar
+	self.vars[varname] = outvar
+	for i in range(self.ncases):
+		self.cases[i].addOutVar(outvar)
+
+
+func preprocess_case(case_obj: Case) -> Case:
+	case_obj.stage = Case.CaseStage.PREPROCESS
+
+	case_obj.sim_input_args = _current_config.preprocess_callable.call(case_obj)
+	
+	return case_obj
+
+func run_case(case: Case) -> Case:
+	case.stage = Case.CaseStage.RUN
+	case.start_time_msec = Time.get_ticks_msec()
+	var case_args: Array = case.sim_input_args.map(func(arg): return arg.get_value())
+	case.run_output = _current_config.run_callable.call(case_args)
+	case.end_time_msec = Time.get_ticks_msec()
+	case.runtime_msec = case.end_time_msec - case.start_time_msec	
+
+	return case
+
+func postprocess_case(case: Case) -> Case:
+	case.stage = Case.CaseStage.POSTPROCESS
+	var case_args: Array = case.run_output.map(func(arg): return arg.get_value())
+	_current_config.postprocess_callable.call(case, case_args)
+	
+	return case
+
+func final_postprocess(all_results: Dictionary) -> void:
+	pass

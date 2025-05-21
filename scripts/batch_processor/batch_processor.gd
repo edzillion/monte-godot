@@ -1,4 +1,4 @@
-# res://experiments/batch_processor.gd
+# res://scripts/batch_processor/batch_processor.gd
 class_name BatchProcessor extends RefCounted
 
 # Thread control signals
@@ -21,8 +21,8 @@ func _init() -> void:
 	processing_complete.connect(_on_processing_complete)
 	
 
-func process(all_tasks: Array, task_executor_callable: Callable, batch_size: int = 10, max_threads_override: int = -1) -> bool:
-	if not all_tasks or all_tasks.is_empty(): # Ensure this check is active
+func process(all_cases: Array[Case], task_executor_callable: Callable, batch_size: int = 10, max_threads_override: int = -1) -> bool:
+	if not all_cases or all_cases.is_empty(): # Ensure this check is active
 		push_warning("BatchProcessor: No tasks provided for processing.")
 		return false
 
@@ -40,7 +40,7 @@ func process(all_tasks: Array, task_executor_callable: Callable, batch_size: int
 
 	_is_processing = true
 	_keep_reference.clear() 
-	_keep_reference.append(all_tasks.duplicate(true)) 
+	_keep_reference.append(all_cases.duplicate(true)) 
 	_current_task_executor = task_executor_callable
 	
 	_control_thread = Thread.new()
@@ -68,16 +68,16 @@ func _process_batches(tasks_to_process: Array, batch_size: int, p_max_threads: i
 	for i: int in range(total_batches):
 		_batch_index = i * batch_size
 		var current_batch_end_idx: int = min(_batch_index + batch_size, tasks_to_process.size())
-		var batch_tasks: Array = tasks_to_process.slice(_batch_index, current_batch_end_idx)
+		var batch_cases: Array = tasks_to_process.slice(_batch_index, current_batch_end_idx)
 		
 		print("BatchProcessor._process_batches: Starting batch %d/%d (tasks %d-%d) with %d tasks." % 
-			[i + 1, total_batches, _batch_index, current_batch_end_idx - 1, batch_tasks.size()])
+			[i + 1, total_batches, _batch_index, current_batch_end_idx - 1, batch_cases.size()])
 		
 		var batch_group_name: String = "managed_batch_%d" % i
 		
 		var group_id: int = WorkerThreadPool.add_group_task(
-			process_task.bind(batch_tasks), # Bind the current batch_tasks slice
-			batch_tasks.size(),             # Number of tasks in this specific batch
+			process_task.bind(batch_cases), # Bind the current batch_tasks slice
+			batch_cases.size(),             # Number of tasks in this specific batch
 			p_max_threads,                  # Max threads for this group
 			false,                          # Low priority
 			batch_group_name
@@ -89,10 +89,10 @@ func _process_batches(tasks_to_process: Array, batch_size: int, p_max_threads: i
 
 
 # This function is executed by worker threads.
-# p_worker_task_idx: The index within the 'batch_tasks_ref' array (0 to N-1 for the current batch).
-# batch_tasks_ref: A reference to the array of tasks for the current batch (bound via .bind()).
-func process_task(p_worker_task_idx: int, batch_tasks_ref: Array) -> void:
-	if p_worker_task_idx < 0 or p_worker_task_idx >= batch_tasks_ref.size():
+# p_worker_task_idx: The index within the 'batch_cases_ref' array (0 to N-1 for the current batch).
+# batch_cases_ref: A reference to the array of cases for the current batch (bound via .bind()).
+func process_task(p_worker_task_idx: int, batch_cases_ref: Array[Case]) -> void:
+	if p_worker_task_idx < 0 or p_worker_task_idx >= batch_cases_ref.size():
 		push_error("BatchProcessor.process_task: p_worker_task_idx out of bounds!")
 		# Potentially place a null or error marker in results if that's desired for robustness
 		return
@@ -112,8 +112,8 @@ func process_task(p_worker_task_idx: int, batch_tasks_ref: Array) -> void:
 		_results[result_idx] = null # Or some error marker
 		return
 
-	var task_input_data = batch_tasks_ref[p_worker_task_idx]
-	var single_task_result = _current_task_executor.call(task_input_data) 
+	var case: Case = batch_cases_ref[p_worker_task_idx]
+	var single_task_result = _current_task_executor.call(case) 
 	_results[result_idx] = single_task_result
 
 

@@ -1,4 +1,19 @@
+# res://examples/estimate_pi/estimate_pi.gd
 class_name EstimatePi extends Node
+
+## Estimates the value of pi using Monte Carlo integration.
+## 
+## This example demonstrates how to use MonteGodot to estimate the value of pi.
+## It shows how to define a job configuration, preprocess and run functions,
+## and postprocess the results.
+## 
+## The job configuration is defined in estimate_pi_job.tres.
+## The preprocess function is defined in _estimate_pi_preprocess.
+## The run function is defined in _estimate_pi_run.
+## The postprocess function is defined in _estimate_pi_postprocess.
+## 
+## The final post-process function is defined in _final_post_process.
+
 var _rng: RandomNumberGenerator
 
 const TOTAL_CASES: int = 10_000_000 # Reduced for quicker testing of stats, was 100M
@@ -26,18 +41,15 @@ func _start_simulation():
 	monte_godot.run_simulations([estimate_pi_job])
 	
 
-func _estimate_pi_preprocess(case:Case) -> Dictionary:
-	var task_data: Dictionary	
-	task_data.x = case.input_values[0]
-	task_data.y = case.input_values[1]
-	return task_data
+func _estimate_pi_preprocess(case:Case) -> Array:			
+	return [case.get_input_value(0), case.get_input_value(1)]
 
 
-func _estimate_pi_run(task_data: Dictionary) -> Dictionary:
-	var x: float = task_data.x.get_value()
-	var y: float = task_data.y.get_value()
+func _estimate_pi_run(case_args: Array) -> Array:
+	var x: float = case_args[0]
+	var y: float = case_args[1]
 	var is_inside_circle: bool = (x*x + y*y) <= 1.0
-	return {"is_inside": is_inside_circle, "x_val": x, "y_val": y}
+	return [is_inside_circle, x, y]
 
 
 func _estimate_pi_postprocess(case_data: Case, run_output: Dictionary) -> void:

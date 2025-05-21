@@ -10,3 +10,12 @@ func generate_run_id() -> String:
 		random_code += chars[randi() % chars.length()]
 	
 	return "%s_%s" % [time_str, random_code] 
+
+func deduplicate_array(arr:Array) -> Array:
+	var deduped_array: Array = []
+	var seen: Dictionary = {}
+	for element in arr:
+		if not seen.has(element):
+			seen[element] = true
+			deduped_array.append(element)	
+	return deduped_array
