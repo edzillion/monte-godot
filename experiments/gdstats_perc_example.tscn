@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://tki8ccj67eec"]
+
+[ext_resource type="Script" uid="uid://b4tp0unse024g" path="res://experiments/gdstats_perc_example.gd" id="1_in3hp"]
+
+[node name="GdstatsPercExample" type="Node2D"]
+script = ExtResource("1_in3hp")

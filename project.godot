@@ -17,8 +17,8 @@ config/icon="res://icon.svg"
 
 [autoload]
 
-ProbabilityServer="*res://addons/gdstats/gdstats.gd"
 Utils="*res://scripts/global/utils.gd"
+GDStats="*res://addons/gdstats/gdstats.gd"
 
 [editor_plugins]
 

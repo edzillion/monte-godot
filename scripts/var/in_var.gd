@@ -304,36 +304,36 @@ func _generate_value_from_distribution() -> Dictionary:
 			# from the top of the function is suitable if we consider it the "source" for this draw attempt.
 			# No change needed to 'pct' variable itself for this case if it represents the initiating draw.
 		DistributionType.BERNOULLI:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_bernoulli(bernoulli_p)) # Implicitly uses its own rand source
+			if GDStats: num = float(GDStats.randi_bernoulli(bernoulli_p)) # Implicitly uses its own rand source
 			else:
-				push_warning("Bernoulli: ProbabilityServer not found. Using basic randf() < p.")
+				push_warning("Bernoulli: GDStats not found. Using basic randf() < p.")
 				num = 1.0 if pct < bernoulli_p else 0.0 # Here, our 'pct' can be used directly
 		DistributionType.BINOMIAL:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_binomial(binomial_p, binomial_n))
-			else: push_warning("Binomial: ProbabilityServer not found."); num = 0.0
+			if GDStats: num = float(GDStats.randi_binomial(binomial_p, binomial_n))
+			else: push_warning("Binomial: GDStats not found."); num = 0.0
 		DistributionType.POISSON:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_poisson(poisson_lambda))
-			else: push_warning("Poisson: ProbabilityServer not found."); num = 0.0
+			if GDStats: num = float(GDStats.randi_poisson(poisson_lambda))
+			else: push_warning("Poisson: GDStats not found."); num = 0.0
 		DistributionType.EXPONENTIAL:
 			# Similar to Normal, randf_exponential uses its own source. Our 'pct' isn't directly used to get the number.
-			if ProbabilityServer: num = float(ProbabilityServer.randf_exponential(exponential_lambda))
-			else: push_warning("Exponential: ProbabilityServer not found."); num = 0.0
+			if GDStats: num = float(GDStats.randf_exponential(exponential_lambda))
+			else: push_warning("Exponential: GDStats not found."); num = 0.0
 		DistributionType.GEOMETRIC:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_geometric(geometric_p))
-			else: push_warning("Geometric: ProbabilityServer not found."); num = 0.0
+			if GDStats: num = float(GDStats.randi_geometric(geometric_p))
+			else: push_warning("Geometric: GDStats not found."); num = 0.0
 		DistributionType.ERLANG:
-			if ProbabilityServer: num = float(ProbabilityServer.randf_erlang(erlang_k, erlang_lambda))
-			else: push_warning("Erlang: ProbabilityServer not found."); num = 0.0
+			if GDStats: num = float(GDStats.randf_erlang(erlang_k, erlang_lambda))
+			else: push_warning("Erlang: GDStats not found."); num = 0.0
 		DistributionType.HISTOGRAM:
-			if ProbabilityServer and not histogram_values.is_empty() and \
+			if GDStats and not histogram_values.is_empty() and \
 			   not histogram_probabilities.is_empty() and \
 			   histogram_values.size() == histogram_probabilities.size():
 				# randv_histogram doesn't take a pct. It implies its own selection.
-				num = float(ProbabilityServer.randv_histogram(histogram_values, histogram_probabilities))
-			else: push_warning("Histogram: ProbabilityServer not found or params invalid/missing."); num = 0.0
+				num = float(GDStats.randv_histogram(histogram_values, histogram_probabilities))
+			else: push_warning("Histogram: GDStats not found or params invalid/missing."); num = 0.0
 		DistributionType.PSEUDO_RANDOM:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_pseudo(pseudo_c))
-			else: push_warning("PseudoRandom: ProbabilityServer not found."); num = 0.0
+			if GDStats: num = float(GDStats.randi_pseudo(pseudo_c))
+			else: push_warning("PseudoRandom: GDStats not found."); num = 0.0
 		DistributionType.CUSTOM:
 			if not num_map.is_empty():
 				var keys: Array = num_map.keys()
@@ -346,19 +346,19 @@ func _generate_value_from_distribution() -> Dictionary:
 				num = float(keys[random_idx]) # Assuming keys can be cast to float; might need adjustment
 			elif not distribution_params.is_empty() and \
 				"values" in distribution_params and "probabilities" in distribution_params:
-				# This is essentially a histogram, which doesn't directly use an input pct with ProbabilityServer
-				if ProbabilityServer:
+				# This is essentially a histogram, which doesn't directly use an input pct with GDStats
+				if GDStats:
 					var values_arr = distribution_params.get("values", [])
 					var probs_arr = distribution_params.get("probabilities", [])
 					if values_arr is Array and not values_arr.is_empty() and \
 					   probs_arr is Array and not probs_arr.is_empty() and \
 					   values_arr.size() == probs_arr.size():
-						num = float(ProbabilityServer.randv_histogram(values_arr, probs_arr))
+						num = float(GDStats.randv_histogram(values_arr, probs_arr))
 					else:
 						push_error("CUSTOM InVar (histogram-like): invalid params.")
 						num = 0.0
 				else:
-					push_warning("CUSTOM InVar (histogram-like): ProbabilityServer not found.")
+					push_warning("CUSTOM InVar (histogram-like): GDStats not found.")
 					num = 0.0
 			else:
 				push_error("CUSTOM InVar: no num_map or valid histogram-like distribution_params.")

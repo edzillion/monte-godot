@@ -183,36 +183,36 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 	print("MonteCarloOrchestrator: All jobs completed.")
 	return OK 
 
-
-func generate_out_vars(num_cases: int, varname: StringName) -> void:
-	vals = []
-	for i in range(num_cases):
-		vals.append(self.cases[i].outvals[varname].val)
-
-	if self.cases[0].outvals[varname].valmapsource == 'auto':
-		uniquevals : set[Any] = set()
-		valmap : dict[Any, float] = None
-		for i in range(self.ncases):
-			if self.cases[i].outvals[varname].valmap is None:
-				uniquevals = None
-			else:
-				uniquevals.update(self.cases[i].outvals[varname].valmap.keys())
-		if uniquevals is not None:
-			valmap = dict()
-			for i, val in enumerate(uniquevals):
-				valmap[val] = i
-	else:
-		valmap = self.cases[0].outvals[varname].valmap
-
-	outvar = OutVar(name=varname, vals=vals, valmap=valmap,
-					ndraws=self.ndraws, seed=seed,
-					firstcaseismedian=self.firstcaseismedian,
-					datasource=datasource)
-	self.outvars[varname] = outvar
-	self.vars[varname] = outvar
-	for i in range(self.ncases):
-		self.cases[i].addOutVar(outvar)
-
+#
+#func generate_out_vars(num_cases: int, varname: StringName) -> void:
+	#vals = []
+	#for i in range(num_cases):
+		#vals.append(self.cases[i].outvals[varname].val)
+#
+	#if self.cases[0].outvals[varname].valmapsource == 'auto':
+		#uniquevals : set[Any] = set()
+		#valmap : dict[Any, float] = None
+		#for i in range(self.ncases):
+			#if self.cases[i].outvals[varname].valmap is None:
+				#uniquevals = None
+			#else:
+				#uniquevals.update(self.cases[i].outvals[varname].valmap.keys())
+		#if uniquevals is not None:
+			#valmap = dict()
+			#for i, val in enumerate(uniquevals):
+				#valmap[val] = i
+	#else:
+		#valmap = self.cases[0].outvals[varname].valmap
+#
+	#outvar = OutVar(name=varname, vals=vals, valmap=valmap,
+					#ndraws=self.ndraws, seed=seed,
+					#firstcaseismedian=self.firstcaseismedian,
+					#datasource=datasource)
+	#self.outvars[varname] = outvar
+	#self.vars[varname] = outvar
+	#for i in range(self.ncases):
+		#self.cases[i].addOutVar(outvar)
+#
 
 func preprocess_case(case_obj: Case) -> Case:
 	case_obj.stage = Case.CaseStage.PREPROCESS
