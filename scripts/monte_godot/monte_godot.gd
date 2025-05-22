@@ -102,12 +102,9 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			for var_idx: int in range(num_input_vars):
 				var current_in_var: InVar = temp_in_var_instances[var_idx]
 				
-				# Determine sampling method (defaulting to RANDOM for now)
-				# TODO: This should ideally come from InVar.sample_method or JobConfig
-				var sampling_method_to_use: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.RANDOM
-				# Example: if current_in_var.sample_method is InVar.SampleMethod.SOBOL:
-				# 	sampling_method_to_use = StatMath.SamplingGen.SamplingMethod.SOBOL 
-				# This requires mapping InVar.SampleMethod enum to StatMath.SamplingGen.SamplingMethod enum
+				# Get the sampling method directly from the InVar instance.
+				# It's already of type StatMath.SamplingGen.SamplingMethod due to changes in InVar.gd.
+				var sampling_method_to_use: StatMath.SamplingGen.SamplingMethod = current_in_var.sample_method
 
 				# Derive a unique seed for this variable's percentile generation to ensure independence if desired
 				var per_var_seed: int = job_seed + current_in_var.var_idx + 1 # Simple way to vary seed per var
@@ -275,8 +272,10 @@ func run_case(case: Case) -> Case:
 
 func postprocess_case(case: Case) -> Case:
 	case.stage = Case.CaseStage.POSTPROCESS
-	var case_args: Array = case.run_output.map(func(arg): return arg.get_value())
-	_current_config.postprocess_callable.call(case, case_args)
+	# case.run_output directly contains the raw output values from the run_callable
+	# E.g., if run_callable returns [true, 0.5, 0.3], then case.run_output is that array.
+	var raw_run_outputs: Array = case.run_output 
+	_current_config.postprocess_callable.call(case, raw_run_outputs) # Pass the case and the raw outputs
 	
 	return case
 

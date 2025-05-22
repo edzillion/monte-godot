@@ -52,9 +52,23 @@ func _estimate_pi_run(case_args: Array) -> Array:
 	return [is_inside_circle, x, y]
 
 
-func _estimate_pi_postprocess(case_data: Case, run_output: Dictionary) -> void:
-	#	current_pi_estimate = 4.0 * _total_inside_circle / _total_processed_count
-	case_data.add_output_value(run_output.is_inside)
+func _estimate_pi_postprocess(case_obj: Case, raw_run_outputs: Array) -> void:
+	# raw_run_outputs is the array: [is_inside_circle, x, y]
+	var is_inside: bool = raw_run_outputs[0]
+	var x_coord: float = raw_run_outputs[1]
+	var y_coord: float = raw_run_outputs[2]
+
+	# Create OutVal instances and add them to the case
+	var out_val_is_inside: OutVal = OutVal.new(&"is_inside", case_obj.id, is_inside)
+	case_obj.add_output_value(out_val_is_inside)
+
+	var out_val_x: OutVal = OutVal.new(&"x_coord", case_obj.id, x_coord)
+	case_obj.add_output_value(out_val_x)
+
+	var out_val_y: OutVal = OutVal.new(&"y_coord", case_obj.id, y_coord)
+	case_obj.add_output_value(out_val_y)
+	
+	# No need to return anything, Case object is modified in place.
 
 
 func _final_post_process(results):
@@ -62,14 +76,24 @@ func _final_post_process(results):
 	for job_name in results.keys():
 		var job = results[job_name]
 		print("Final results for: ", job_name)
-		var cases = job.results
+		var cases: Array[Case] = job.results
 		var total_cases: int = cases.size()
 		var total_inside_circle: int = 0
-		for i in range(total_cases):
-			if cases[i].output_values[0]:
-				total_inside_circle += 1					
+		for case_obj: Case in cases:
+			var case_output_vals: Array[OutVal] = case_obj.get_output_values()
+			for out_val: OutVal in case_output_vals:
+				if out_val.name == &"is_inside":
+					# Assuming Val.get_value() returns the boolean stored in OutVal's num_value
+					if out_val.get_value() == true:
+						total_inside_circle += 1
+					break # Found "is_inside" for this case
 
-		var final_pi_estimate: float = 4.0 * total_inside_circle / total_cases
+		var final_pi_estimate: float = 0.0
+		if total_cases > 0:
+			final_pi_estimate = 4.0 * total_inside_circle / total_cases
+		else:
+			push_warning("Job '%s': No cases found in results for final calculation." % job_name)
+		
 		print("Final Pi estimate after %d total processed cases: %f" % [total_cases, final_pi_estimate])
 		print("Target total cases: %d" % TOTAL_CASES)
 		print("------------------------------------")
