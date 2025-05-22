@@ -3,10 +3,9 @@
 class_name InVar extends Resource
 
 #region Properties
-var name: StringName ## User-friendly name for the variable.
-var description: String ## A more detailed description of what the variable represents.
 var ndraws: int = 0 ## The number of random draws.
 var var_idx: int = -1 ## The number/index of this input variable.
+var percentiles: Array[float] = [] ## Stores the pre-generated percentiles for this variable for all cases.
 #endregion
 
 #region Enums
@@ -25,16 +24,14 @@ enum DistributionType {
 	CUSTOM        # params: Uses num_map directly or custom logic with distribution_params.
 }
 
-## @brief Defines the random sampling method to use. Placeholder for now.
-enum SampleMethod {
-	RANDOM, # Default, simple random sampling
-	SOBOL,  # Placeholder for Sobol sequences
-	LATIN_HYPERCUBE # Placeholder for Latin Hypercube Sampling
-}
-var sample_method: SampleMethod = SampleMethod.RANDOM ## The random sampling method to use.
+var sample_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.RANDOM ## The random sampling method to use.
 #endregion
 
 #region Exported Variables
+@export_category("Description")
+@export var name: StringName ## User-friendly name for the variable.
+@export var description: String ## A more detailed description of what the variable represents.
+
 @export var distribution_type: DistributionType = DistributionType.UNIFORM:
 	set(value):
 		distribution_type = value
@@ -88,6 +85,7 @@ var num_map: Dictionary = {}
 
 # Stores parameters when distribution_type is CUSTOM or for initial programmatic setup.
 var distribution_params: Dictionary = {}
+var _nums: Array[float] = [] ## Stores the raw numerical values generated from percentiles.
 
 
 func _init(
@@ -96,8 +94,9 @@ func _init(
 	p_distribution_params: Dictionary = {}, 
 	p_description: String = "",
 	p_ndraws: int = 0,
-	p_sample_method: SampleMethod = SampleMethod.RANDOM,
-	p_var_idx: int = -1
+	p_sample_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.RANDOM,
+	p_var_idx: int = -1,
+	p_percentiles: Array[float] = []
 	) -> void:
 	self.resource_name = p_name
 	self.description = p_description
@@ -106,12 +105,15 @@ func _init(
 	self.var_idx = p_var_idx
 	
 	distribution_type = p_distribution_type # Set early
+	self.percentiles = p_percentiles.duplicate() # Store a copy
 	
 	if not p_distribution_params.is_empty():
 		distribution_params = p_distribution_params.duplicate()
 		_update_exported_fields_from_dict(distribution_params)
 	else:
 		_update_dict_from_exported_fields()
+
+	generate_all_values()
 
 	set_distribution_type(p_distribution_type) # Call full setter
 
@@ -123,15 +125,44 @@ func set_distribution_type(value: DistributionType) -> void:
 	if Engine.is_editor_hint():
 		notify_property_list_changed()
 
-func get_value() -> InVal:
-	var dist_output: Dictionary = _generate_value_from_distribution()
-	var raw_num: float = dist_output.get("num", 0.0)
-	var raw_pct: float = dist_output.get("pct", -1.0) # Default to -1.0 if not found
+func get_value(p_case_idx: int) -> InVal:
+	var debug_mode: bool = ProjectSettings.get_setting("monte_carlo/debug_mode", false)
+
+	if _nums.is_empty() and not percentiles.is_empty():
+		push_warning("InVar '%s': get_value() called but _nums is empty. Did you forget to call generate_all_values()? Attempting to generate now." % resource_name)
+		generate_all_values()
+		# If still empty, then there was an issue (e.g. no percentiles)
+		if _nums.is_empty() and ndraws > 0:
+			push_error("InVar '%s': Failed to populate _nums even after calling generate_all_values(). Check percentile data and ndraws." % resource_name)
+			if debug_mode: assert(false, "InVar '%s': _nums empty after generation attempt." % resource_name)
+			return InVal.new(0.0, 0.0, -1.0) # num, mapped_val, pct
+
+	if p_case_idx < 0 or p_case_idx >= _nums.size():
+		var err_msg = "InVar '%s': Case index %d is out of bounds for _nums (size: %d)." % [resource_name, p_case_idx, _nums.size()]
+		push_error(err_msg)
+		if debug_mode: assert(false, err_msg)
+		return InVal.new(0.0, 0.0, -1.0) # Return a default/error InVal
+
+	var raw_num: float = _nums[p_case_idx]
+	var raw_pct: float = -1.0
+
+	if p_case_idx < 0 or p_case_idx >= percentiles.size():
+		var err_msg_pct = "InVar '%s': Case index %d is out of bounds for percentiles array (size: %d). Cannot retrieve percentile." % [resource_name, p_case_idx, percentiles.size()]
+		push_warning(err_msg_pct) # Warning because we can still proceed with the raw_num
+	else:
+		raw_pct = percentiles[p_case_idx]
+
+	var mapped_val: Variant = raw_num
+	if not num_map.is_empty():
+		# Attempt to find the raw_num or a close floating point match in num_map keys
+		# Direct dictionary key lookup for floats can be problematic due to precision.
+		# For now, direct lookup. Consider a more robust lookup if issues arise.
+		if num_map.has(raw_num):
+			mapped_val = num_map[raw_num]
+		# else: consider warning if a map exists but no key matches, if that's unexpected.
 	
-	var mapped_val: Variant = raw_num # Default mapped_value to raw_num
-	if not num_map.is_empty() and num_map.has(raw_num):
-		mapped_val = num_map[raw_num]
-	
+	# The InVal constructor needs to be: InVal.new(p_num: float, p_mapped_val: Variant, p_percentile: float)
+	# Make sure InVal.gd is updated to match this signature and store the percentile.
 	return InVal.new(raw_num, mapped_val, raw_pct)
 
 func _update_distribution_info() -> void:
@@ -287,84 +318,69 @@ func _validate_property(property: Dictionary) -> void:
 			property.usage &= ~PROPERTY_USAGE_EDITOR
 
 
-func _generate_value_from_distribution() -> Dictionary:
-	var pct: float = randf() # Base percentile for many distributions
+func _generate_value_for_percentile(p_percentile: float) -> Dictionary:
+	# Ensure distribution_params is up-to-date from exported fields if they were changed in editor
+	if Engine.is_editor_hint():
+		_update_dict_from_exported_fields()
+
+	var debug_mode: bool = ProjectSettings.get_setting("monte_godot/debug_mode", false)
+
 	var num: float = 0.0
+	var pct_for_ppf: float = p_percentile
 
 	match distribution_type:
 		DistributionType.UNIFORM:
-			# Use the 'pct' to derive the number in the uniform range
-			num = uniform_a + pct * (uniform_b - uniform_a)
+			num = StatMath.PpfFunctions.uniform_ppf(pct_for_ppf, self.uniform_a, self.uniform_b)
 		DistributionType.NORMAL:
-			# randfn() generates its own randomness; we can't directly inject 'pct'.
-			# The returned 'pct' here will be a new random value, not necessarily
-			# from a pre-sampled batch if that were used.
-			num = randfn(normal_mean, normal_std_dev)
-			# If we *must* associate a pct, it's a new one. The original 'pct' variable
-			# from the top of the function is suitable if we consider it the "source" for this draw attempt.
-			# No change needed to 'pct' variable itself for this case if it represents the initiating draw.
+			num = StatMath.PpfFunctions.normal_ppf(pct_for_ppf, self.normal_mean, self.normal_std_dev)
 		DistributionType.BERNOULLI:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_bernoulli(bernoulli_p)) # Implicitly uses its own rand source
-			else:
-				push_warning("Bernoulli: ProbabilityServer not found. Using basic randf() < p.")
-				num = 1.0 if pct < bernoulli_p else 0.0 # Here, our 'pct' can be used directly
+			num = StatMath.PpfFunctions.bernoulli_ppf(pct_for_ppf, self.bernoulli_p)
 		DistributionType.BINOMIAL:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_binomial(binomial_p, binomial_n))
-			else: push_warning("Binomial: ProbabilityServer not found."); num = 0.0
+			num = float(StatMath.PpfFunctions.binomial_ppf(pct_for_ppf, self.binomial_n, self.binomial_p))
 		DistributionType.POISSON:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_poisson(poisson_lambda))
-			else: push_warning("Poisson: ProbabilityServer not found."); num = 0.0
+			num = float(StatMath.PpfFunctions.poisson_ppf(pct_for_ppf, self.poisson_lambda))
 		DistributionType.EXPONENTIAL:
-			# Similar to Normal, randf_exponential uses its own source. Our 'pct' isn't directly used to get the number.
-			if ProbabilityServer: num = float(ProbabilityServer.randf_exponential(exponential_lambda))
-			else: push_warning("Exponential: ProbabilityServer not found."); num = 0.0
+			num = StatMath.PpfFunctions.exponential_ppf(pct_for_ppf, self.exponential_lambda)
 		DistributionType.GEOMETRIC:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_geometric(geometric_p))
-			else: push_warning("Geometric: ProbabilityServer not found."); num = 0.0
+			num = float(StatMath.PpfFunctions.geometric_ppf(pct_for_ppf, self.geometric_p))
 		DistributionType.ERLANG:
-			if ProbabilityServer: num = float(ProbabilityServer.randf_erlang(erlang_k, erlang_lambda))
-			else: push_warning("Erlang: ProbabilityServer not found."); num = 0.0
+			num = StatMath.PpfFunctions.gamma_ppf(pct_for_ppf, float(self.erlang_k), self.erlang_lambda)
 		DistributionType.HISTOGRAM:
-			if ProbabilityServer and not histogram_values.is_empty() and \
-			   not histogram_probabilities.is_empty() and \
-			   histogram_values.size() == histogram_probabilities.size():
-				# randv_histogram doesn't take a pct. It implies its own selection.
-				num = float(ProbabilityServer.randv_histogram(histogram_values, histogram_probabilities))
-			else: push_warning("Histogram: ProbabilityServer not found or params invalid/missing."); num = 0.0
+			num = StatMath.PpfFunctions.discrete_histogram_ppf(pct_for_ppf, self.histogram_values, self.histogram_probabilities)
 		DistributionType.PSEUDO_RANDOM:
-			if ProbabilityServer: num = float(ProbabilityServer.randi_pseudo(pseudo_c))
-			else: push_warning("PseudoRandom: ProbabilityServer not found."); num = 0.0
+			push_warning("InVar '%s': PPF for PSEUDO_RANDOM is not straightforward. Returning percentile as num." % resource_name)
+			num = pct_for_ppf
 		DistributionType.CUSTOM:
-			if not num_map.is_empty():
-				var keys: Array = num_map.keys()
-				if keys.is_empty():
-					push_error("CUSTOM InVar: num_map is empty.")
-					return {"num": 0.0, "pct": pct}
-				# Use the 'pct' to select an index from the keys
-				var random_idx: int = int(floor(pct * keys.size()))
-				random_idx = min(random_idx, keys.size() - 1) # Ensure index is within bounds
-				num = float(keys[random_idx]) # Assuming keys can be cast to float; might need adjustment
-			elif not distribution_params.is_empty() and \
-				"values" in distribution_params and "probabilities" in distribution_params:
-				# This is essentially a histogram, which doesn't directly use an input pct with ProbabilityServer
-				if ProbabilityServer:
-					var values_arr = distribution_params.get("values", [])
-					var probs_arr = distribution_params.get("probabilities", [])
-					if values_arr is Array and not values_arr.is_empty() and \
-					   probs_arr is Array and not probs_arr.is_empty() and \
-					   values_arr.size() == probs_arr.size():
-						num = float(ProbabilityServer.randv_histogram(values_arr, probs_arr))
-					else:
-						push_error("CUSTOM InVar (histogram-like): invalid params.")
-						num = 0.0
-				else:
-					push_warning("CUSTOM InVar (histogram-like): ProbabilityServer not found.")
-					num = 0.0
+			if num_map.has(pct_for_ppf):
+				num = num_map[pct_for_ppf]
 			else:
-				push_error("CUSTOM InVar: no num_map or valid histogram-like distribution_params.")
-				num = 0.0
+				push_warning("InVar '%s': CUSTOM distribution: no num_map for percentile %f. Returning percentile as num." % [resource_name, pct_for_ppf])
+				num = pct_for_ppf
 		_:
-			push_error("Unsupported distribution type in InVar: %s" % DistributionType.keys()[distribution_type])
-			num = 0.0
+			push_error("Unsupported distribution type for PPF: %s" % DistributionType.keys()[distribution_type])
+			if debug_mode:
+				assert(false, "Unsupported distribution type for PPF: %s" % DistributionType.keys()[distribution_type])
+
+	return {"num": num, "pct": pct_for_ppf}
+
+func generate_all_values() -> void:
+	_nums.clear()
+	if percentiles.is_empty() and ndraws > 0:
+		# If ndraws is set but percentiles aren't, it implies they should have been generated by SimManager
+		push_warning("InVar '%s': generate_all_values() called with no percentiles but ndraws = %d. Values will not be generated." % [resource_name, ndraws])
+		return
+	if percentiles.is_empty() and ndraws == 0:
+		# No percentiles and no draws expected, so nothing to do.
+		return
+
+	for p_idx in range(percentiles.size()):
+		var percentile_val: float = percentiles[p_idx]
+		var generated_output: Dictionary = _generate_value_for_percentile(percentile_val)
+		var raw_num: float = generated_output.get("num", 0.0)
+		_nums.append(raw_num)
 	
-	return {"num": num, "pct": pct}
+	# Validate sizes if ndraws was specified and we have percentiles
+	if ndraws > 0 and not percentiles.is_empty() and _nums.size() != percentiles.size():
+		push_error("InVar '%s': Mismatch! Drawn values (%d) vs Percentiles (%d). Expected based on ndraws: %d" % [resource_name, _nums.size(), percentiles.size(), ndraws])
+	elif ndraws > 0 and _nums.size() != ndraws and not percentiles.is_empty(): # Check against ndraws if percentiles were used
+		push_warning("InVar '%s': Number of drawn values (%d) does not match ndraws (%d), but matches percentiles array size (%d)." % [resource_name, _nums.size(), ndraws, percentiles.size()])

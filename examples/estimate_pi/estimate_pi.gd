@@ -45,66 +45,57 @@ func _estimate_pi_preprocess(case:Case) -> Array:
 	return [case.get_input_value(0), case.get_input_value(1)]
 
 
-func _estimate_pi_run(case_args: Array) -> Array:
+func _estimate_pi_run(case_args: Array) -> Array[bool]:
 	var x: float = case_args[0]
 	var y: float = case_args[1]
-	var is_inside_circle: bool = (x*x + y*y) <= 1.0
-	return [is_inside_circle, x, y]
+	var is_inside_circle:bool = (x*x + y*y) <= 1.0
+	return [is_inside_circle]    
 
 
-func _estimate_pi_postprocess(case_data: Case, run_output: Dictionary) -> void:
-	#	current_pi_estimate = 4.0 * _total_inside_circle / _total_processed_count
-	case_data.add_output_value(run_output.is_inside)
-
-
-func _final_post_process(results):
+func _estimate_pi_postprocess(case_obj: Case, is_in_circle: Array[bool]) -> void: # Expects bool
+	var out_val_is_inside: OutVal = OutVal.new(&"is_inside", case_obj.id, is_in_circle[0])
+	case_obj.add_output_value(out_val_is_inside)
 	
-	for job_name in results.keys():
-		var job = results[job_name]
-		print("Final results for: ", job_name)
-		var cases = job.results
-		var total_cases: int = cases.size()
-		var total_inside_circle: int = 0
-		for i in range(total_cases):
-			if cases[i].output_values[0]:
-				total_inside_circle += 1					
 
-		var final_pi_estimate: float = 4.0 * total_inside_circle / total_cases
-		print("Final Pi estimate after %d total processed cases: %f" % [total_cases, final_pi_estimate])
-		print("Target total cases: %d" % TOTAL_CASES)
-		print("------------------------------------")
-		print("--- Performance Statistics ---")
+func _final_post_process(all_job_results: Dictionary) -> void:
+	print("--- Monte Carlo Simulation: Final Results ---")
 
-		if job.stats and not job.stats.is_empty() and not job.stats.has("error"): 
-			var stats_dict: Dictionary = job.stats
+	for job_name: StringName in all_job_results.keys():
+		var job_data: Dictionary = all_job_results[job_name]
+		print("--- Job: %s ---" % job_name)
 
-			print("Total cases processed: %d" % stats_dict.get("cases_processed", 0))
-			print("Number of super-batches: %d" % stats_dict.get("num_super_batches", 0))
-			print("Total execution time (orchestrator timer): %.3f seconds" % (stats_dict.get("total_execution_time_msec", 0) / 1000.0))
+		var output_vars: Dictionary = job_data.get("output_vars", {}) # StringName -> OutVar
 
-			var total_preprocess_msec: int = stats_dict.get("total_preprocess_time_msec", 0)
-			var total_run_msec: int = stats_dict.get("total_run_time_msec", 0)
-			var total_postprocess_msec: int = stats_dict.get("total_postprocess_time_msec", 0)
+		# --- Pi Estimation Specific Logic ---
+		if output_vars.has(&"is_inside"):
+			var is_inside_out_var: OutVar = output_vars[&"is_inside"]
+			var is_inside_values: Array = is_inside_out_var.get_all_raw_values()
+			var is_inside_count: int = is_inside_values.size()
+			var total_inside_circle: int = 0
+			for val_raw in is_inside_values:
+				if val_raw == true:
+					total_inside_circle += 1
 			
-			var sum_of_all_stages_msec: int = total_preprocess_msec + \
-											  total_run_msec + \
-											  total_postprocess_msec
-			print("Total time (sum of job stages): %.3f seconds" % (sum_of_all_stages_msec / 1000.0))
-			
-			var num_sb: int = stats_dict.get("num_super_batches", 0)
-			if num_sb > 0:
-				print("Average preprocess time per super-batch: %.3f ms" % stats_dict.get("avg_preprocess_time_per_super_batch_msec", 0.0))
-				print("Average run time per super-batch: %.3f ms" % stats_dict.get("avg_run_time_per_super_batch_msec", 0.0))
-				print("Average postprocess time per super-batch: %.3f ms" % stats_dict.get("avg_postprocess_time_per_super_batch_msec", 0.0))
-			elif stats_dict.get("cases_processed", 0) > 0:
-				print("Super-batch averages are not applicable (e.g., total cases less than one super-batch or stats were zeroed).")
-			else:
-				print("No performance stats recorded for super-batches (no cases processed or error during processing).")
+			if is_inside_count > 0:
+				var final_pi_estimate: float = 4.0 * total_inside_circle / is_inside_count
+				print("Final Pi estimate: %f (from %d / %d)" % [final_pi_estimate, total_inside_circle, is_inside_count])
 		
-		elif job.stats and job.stats.has("error"):
-			print("Job encountered an error: %s" % job.stats.get("error", "Unknown error description."))
-		elif TOTAL_CASES > 0:
-			print("No valid performance statistics were recorded for this job, or an error occurred before stats could be gathered.")
+		# --- Print Statistics for All Output Variables ---
+		if not output_vars.is_empty():
+			print("-- Output Variable Statistics --")
+			for var_name: StringName in output_vars.keys():
+				var out_var_instance: OutVar = output_vars[var_name]
+				var ov_stats: Dictionary = out_var_instance.calculate_stats() # Uses EZSTATS.all()
+				print("  Variable: '%s'" % var_name)
+				for stat_key in ov_stats.keys():
+					print("    %s : %s" % [str(stat_key), str(ov_stats[stat_key])])
 		
+		# --- Orchestrator Performance ---
+		var orchestrator_stats: Dictionary = job_data.get("stats", {})
+		if orchestrator_stats.has("total_execution_time_msec"):
+			print("-- Orchestrator Performance --")
+			print("  Total job execution time: %.3f seconds" % (orchestrator_stats.get("total_execution_time_msec", 0) / 1000.0))
+
 		print("------------------------------------")
-		get_tree().quit()
+
+	get_tree().quit()
