@@ -65,17 +65,64 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			continue
 
 		# 0. Initialize Input Variables
-		var input_vars: Array[Dictionary] = _current_config.in_vars
-		var in_var_idx: int = 0
-		for input_var_dict in input_vars:
-			var in_var: InVar = input_var_dict.get("distribution")
+		var job_input_vars_config: Array[Dictionary] = _current_config.in_vars
+		# Clear previous job's vars if any, to ensure fresh state for current job
+		self.in_vars.clear()
+		self.vars.clear() 
+
+		var temp_in_var_instances: Array[InVar] = []
+		for idx: int in range(job_input_vars_config.size()):
+			var input_var_dict: Dictionary = job_input_vars_config[idx]
+			var in_var_resource: InVar = input_var_dict.get("distribution") # This should be the InVar resource itself
+			if not in_var_resource is InVar:
+				push_error("Job '%s': Invalid InVar resource for '%s'. Skipping." % [_current_config.job_name, input_var_dict.name])
+				continue
+
+			# It's better to duplicate the resource if it might be shared or modified by other jobs concurrently
+			# For now, assuming direct use is fine if jobs run sequentially or resources are unique per job config.
+			# var in_var: InVar = in_var_resource.duplicate() # Optional: consider if duplication is needed.
+			var in_var: InVar = in_var_resource
+
 			in_var.name = input_var_dict.name
 			in_var.ndraws = _current_config.n_cases			
-			in_var.var_idx = in_var_idx
-			in_var_idx += 1
-			self.in_vars[in_var.name] = in_var
-			self.vars[in_var.name] = in_var
+			in_var.var_idx = idx # Use the loop index as var_idx for consistent ordering
+			temp_in_var_instances.append(in_var)
+			self.in_vars[in_var.name] = in_var # Storing by name
+			self.vars[in_var.name] = in_var # Assuming vars is a general pool, might need review
+
+		# Generate and distribute percentiles only if there are input variables and cases
+		if not temp_in_var_instances.is_empty() and _current_config.n_cases > 0:
+			var num_input_vars: int = temp_in_var_instances.size()
+			# Assuming JobConfig has a 'seed' property or we manage seeding appropriately
+			var job_seed: int = _current_config.seed if _current_config.has_method("get_seed") else 0 
 			
+			# Assuming StatMath and StatMath.SamplingGen are available as per user instruction.
+			# No explicit check for their existence will be performed here.
+
+			for var_idx: int in range(num_input_vars):
+				var current_in_var: InVar = temp_in_var_instances[var_idx]
+				
+				# Determine sampling method (defaulting to RANDOM for now)
+				# TODO: This should ideally come from InVar.sample_method or JobConfig
+				var sampling_method_to_use: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.RANDOM
+				# Example: if current_in_var.sample_method is InVar.SampleMethod.SOBOL:
+				# 	sampling_method_to_use = StatMath.SamplingGen.SamplingMethod.SOBOL 
+				# This requires mapping InVar.SampleMethod enum to StatMath.SamplingGen.SamplingMethod enum
+
+				# Derive a unique seed for this variable's percentile generation to ensure independence if desired
+				var per_var_seed: int = job_seed + current_in_var.var_idx + 1 # Simple way to vary seed per var
+				
+				var var_percentiles: Array[float] = StatMath.SamplingGen.generate_samples_1d(_current_config.n_cases, sampling_method_to_use, per_var_seed)
+
+				if var_percentiles.is_empty() and _current_config.n_cases > 0:
+					push_error("MonteGodot: Job '%s', InVar '%s' (%d) - Failed to generate percentiles using StatMath.SamplingGen." % [current_job_name, current_in_var.name, current_in_var.var_idx])
+					# Decide how to handle this: skip InVar, skip job, or use fallback?
+					# For now, let InVar get an empty list, it will warn/error downstream.
+					current_in_var.percentiles = []
+				else:
+					current_in_var.percentiles = var_percentiles
+				
+				current_in_var.generate_all_values() # This pre-calculates _drawn_values in InVar
 
 		job_started.emit(current_job_name)
 		print("MonteCarloOrchestrator: Starting job '%s' (n_cases: %d, threads: %d, super_batch_size: %d, inner_batch_size: %d)." %
@@ -83,10 +130,26 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 
 		# 1. Generate All Cases for the Job (once)
 		var all_cases_for_job: Array[Case] = []
+		if _current_config.n_cases > 0 and self.in_vars.is_empty() and not job_input_vars_config.is_empty():
+			push_warning("MonteCarloOrchestrator: Job '%s' has n_cases > 0 but no InVars were successfully initialized. Cannot generate cases." % current_job_name)
+			# This situation might arise if all InVar resources in the config were invalid.
+			# Error handling for this scenario (e.g., skipping the job) is already partially covered by the percentile generation checks.
+
 		for i: int in range(_current_config.n_cases):
-			var case_obj: Case = Case.new(i)
-			case_obj.add_input_value(self.in_vars["x"].get_value())
-			case_obj.add_input_value(self.in_vars["y"].get_value())
+			var case_obj: Case = Case.new(i) # i is the case_idx
+			
+			# Iterate through the initialized InVar instances for this job
+			# We need to ensure they are added in the order of their var_idx for consistency
+			# if downstream code relies on input_value index.
+			var sorted_in_vars: Array[InVar] = get_input_vars_typed()
+			# Sort InVars by their var_idx to ensure deterministic order of InVals in Case
+			sorted_in_vars.sort_custom(func(a: InVar, b: InVar): return a.var_idx < b.var_idx)
+
+			for in_var_instance: InVar in sorted_in_vars:
+				# Get the specific InVal for this InVar and this case_idx (i)
+				var specific_in_val: InVal = in_var_instance.get_value(i) 
+				case_obj.add_input_value(specific_in_val)
+			
 			all_cases_for_job.append(case_obj)
 
 		if all_cases_for_job.is_empty() and _current_config.n_cases > 0:
@@ -183,36 +246,15 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 	print("MonteCarloOrchestrator: All jobs completed.")
 	return OK 
 
-#
-#func generate_out_vars(num_cases: int, varname: StringName) -> void:
-	#vals = []
-	#for i in range(num_cases):
-		#vals.append(self.cases[i].outvals[varname].val)
-#
-	#if self.cases[0].outvals[varname].valmapsource == 'auto':
-		#uniquevals : set[Any] = set()
-		#valmap : dict[Any, float] = None
-		#for i in range(self.ncases):
-			#if self.cases[i].outvals[varname].valmap is None:
-				#uniquevals = None
-			#else:
-				#uniquevals.update(self.cases[i].outvals[varname].valmap.keys())
-		#if uniquevals is not None:
-			#valmap = dict()
-			#for i, val in enumerate(uniquevals):
-				#valmap[val] = i
-	#else:
-		#valmap = self.cases[0].outvals[varname].valmap
-#
-	#outvar = OutVar(name=varname, vals=vals, valmap=valmap,
-					#ndraws=self.ndraws, seed=seed,
-					#firstcaseismedian=self.firstcaseismedian,
-					#datasource=datasource)
-	#self.outvars[varname] = outvar
-	#self.vars[varname] = outvar
-	#for i in range(self.ncases):
-		#self.cases[i].addOutVar(outvar)
-#
+func get_input_vars_typed() -> Array[InVar]:
+	var typed_in_vars: Array[InVar] = []
+	var values_array: Array = self.in_vars.values()
+	for val in values_array:
+		if val is InVar:
+			typed_in_vars.append(val)
+		else:
+			push_error("MonteGodot: Non-InVar type found in self.in_vars. This should not happen. Value: %s" % str(val))
+	return typed_in_vars
 
 func preprocess_case(case_obj: Case) -> Case:
 	case_obj.stage = Case.CaseStage.PREPROCESS

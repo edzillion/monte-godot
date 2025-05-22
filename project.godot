@@ -18,11 +18,11 @@ config/icon="res://icon.svg"
 [autoload]
 
 Utils="*res://scripts/global/utils.gd"
-GDStats="*res://addons/gdstats/gdstats.gd"
+StatMath="*res://addons/godot-stat-math/stat_math.gd"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg", "res://addons/gdstats/plugin.cfg", "res://addons/god_plot/plugin.cfg", "res://addons/numdot/plugin.cfg")
+enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg", "res://addons/god_plot/plugin.cfg", "res://addons/godot-stat-math/plugin.cfg", "res://addons/numdot/plugin.cfg")
 
 [rendering]
 
