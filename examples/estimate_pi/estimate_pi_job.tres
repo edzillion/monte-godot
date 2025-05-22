@@ -1,21 +1,18 @@
-[gd_resource type="Resource" script_class="JobConfig" load_steps=3 format=3 uid="uid://rmjfndp1yorj"]
+[gd_resource type="Resource" script_class="JobConfig" load_steps=5 format=3 uid="uid://rmjfndp1yorj"]
 
+[ext_resource type="Script" uid="uid://gxkhtbbos2yk" path="res://scripts/var/in_var.gd" id="1_7cbdq"]
 [ext_resource type="Script" uid="uid://dhfvnpa36t4em" path="res://scripts/job_config/job_config.gd" id="1_rseo3"]
-[ext_resource type="Resource" uid="uid://dn5vsas2i5ylt" path="res://examples/estimate_pi/uniform_distrib.tres" id="1_tqfpw"]
+[ext_resource type="Resource" uid="uid://dv6m4j7j5obns" path="res://examples/estimate_pi/x_in_var.tres" id="2_s5xho"]
+[ext_resource type="Resource" uid="uid://b6ohnkn0nc7jl" path="res://examples/estimate_pi/y_in_var.tres" id="3_ijps7"]
 
 [resource]
 script = ExtResource("1_rseo3")
 job_name = "DefaultJob"
 n_cases = 1000
 num_threads = 4
+first_case_is_median = 0
 super_batch_size = 100
 inner_batch_size = 10
-in_vars = Array[Dictionary]([{
-&"distribution": ExtResource("1_tqfpw"),
-&"name": &"x"
-}, {
-&"distribution": ExtResource("1_tqfpw"),
-&"name": &"y"
-}])
+in_vars = Array[ExtResource("1_7cbdq")]([ExtResource("2_s5xho"), ExtResource("3_ijps7")])
 other_configs = {}
 metadata/_custom_type_script = "uid://dhfvnpa36t4em"

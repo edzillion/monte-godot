@@ -4,20 +4,20 @@ class_name MonteGodot extends RefCounted
 signal job_started(job_name: String)
 ## Emitted when an individual job configuration starts processing.
 
-signal job_completed(job_name: String, job_results: Array[Case], job_stats: Dictionary)
+signal job_completed(job_name: String, job_results: Array[Case], job_stats: Dictionary, job_output_vars: Dictionary)
 ## Emitted when an individual job configuration finishes processing.
 ## `job_results` is an array of Case objects, now populated with output_values.
 ## `job_stats` is a Dictionary with timing and batching information.
+## `job_output_vars` is a Dictionary mapping output variable StringNames to OutVar objects.
 
 signal all_jobs_completed(all_aggregated_results: Dictionary)
 ## Emitted when all job configurations have been processed.
 ## `all_aggregated_results` is a Dictionary mapping job_name (String) to a sub-dictionary
-## containing {"results": Array[Case], "stats": Dictionary}.
+## containing {"results": Array[Case], "stats": Dictionary, "output_vars": Dictionary}.
 
 var _batch_processor: BatchProcessor
 var _is_running_jobs: bool = false
-var in_vars: Dictionary = {}
-var vars: Dictionary = {}
+var in_vars: Dictionary[StringName, InVar] = {}
 
 var _job_configs: Array[JobConfig] = []
 var _current_config: JobConfig = null
@@ -32,11 +32,11 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 	This function is awaitable. The results are primarily delivered via signals.
 	"""
 	if _is_running_jobs:
-		push_warning("MonteCarloOrchestrator: Already running simulations. New request ignored.")
+		push_warning("MonteGodot: Already running simulations. New request ignored.")
 		return FAILED
 
 	if p_job_configs.is_empty():
-		push_warning("MonteCarloOrchestrator: No job configurations provided.")
+		push_warning("MonteGodot: No job configurations provided.")
 		all_jobs_completed.emit({})
 		return OK
 
@@ -54,41 +54,36 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		if _current_config:
 			current_job_name = _current_config.job_name
 		else:
-			push_warning("MonteCarloOrchestrator: Encountered a null JobConfig. Skipping.")
+			push_warning("MonteGodot: Encountered a null JobConfig. Skipping.")
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Skipped - Null JobConfig"}}
 			continue
 
 		if not _current_config.is_valid():
-			push_warning("MonteCarloOrchestrator: Skipping invalid JobConfig: '%s'" % current_job_name)
+			push_warning("MonteGodot: Skipping invalid JobConfig: '%s'" % current_job_name)
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Skipped - Invalid Config"}}
-			job_completed.emit(current_job_name, [], {"error": "Invalid Config"})
+			job_completed.emit(current_job_name, [], {"error": "Invalid Config"}, {})
 			continue
 
 		# 0. Initialize Input Variables
-		var job_input_vars_config: Array[Dictionary] = _current_config.in_vars
+
 		# Clear previous job's vars if any, to ensure fresh state for current job
 		self.in_vars.clear()
-		self.vars.clear() 
 
 		var temp_in_var_instances: Array[InVar] = []
-		for idx: int in range(job_input_vars_config.size()):
-			var input_var_dict: Dictionary = job_input_vars_config[idx]
-			var in_var_resource: InVar = input_var_dict.get("distribution") # This should be the InVar resource itself
+		for i: int in range(_current_config.in_vars.size()):
+			var in_var_resource: InVar = _current_config.in_vars[i]
 			if not in_var_resource is InVar:
-				push_error("Job '%s': Invalid InVar resource for '%s'. Skipping." % [_current_config.job_name, input_var_dict.name])
+				push_error("Job '%s': Invalid InVar resource for '%s'. Skipping." % [_current_config.job_name, in_var_resource.name])
 				continue
 
 			# It's better to duplicate the resource if it might be shared or modified by other jobs concurrently
 			# For now, assuming direct use is fine if jobs run sequentially or resources are unique per job config.
 			# var in_var: InVar = in_var_resource.duplicate() # Optional: consider if duplication is needed.
 			var in_var: InVar = in_var_resource
-
-			in_var.name = input_var_dict.name
 			in_var.ndraws = _current_config.n_cases			
-			in_var.var_idx = idx # Use the loop index as var_idx for consistent ordering
+			in_var.var_idx = i # Use the loop index as var_idx for consistent ordering
 			temp_in_var_instances.append(in_var)
 			self.in_vars[in_var.name] = in_var # Storing by name
-			self.vars[in_var.name] = in_var # Assuming vars is a general pool, might need review
 
 		# Generate and distribute percentiles only if there are input variables and cases
 		if not temp_in_var_instances.is_empty() and _current_config.n_cases > 0:
@@ -122,13 +117,13 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 				current_in_var.generate_all_values() # This pre-calculates _drawn_values in InVar
 
 		job_started.emit(current_job_name)
-		print("MonteCarloOrchestrator: Starting job '%s' (n_cases: %d, threads: %d, super_batch_size: %d, inner_batch_size: %d)." %
+		print("MonteGodot: Starting job '%s' (n_cases: %d, threads: %d, super_batch_size: %d, inner_batch_size: %d)." %
 			[current_job_name, _current_config.n_cases, _current_config.num_threads, _current_config.super_batch_size, _current_config.inner_batch_size])
 
 		# 1. Generate All Cases for the Job (once)
 		var all_cases_for_job: Array[Case] = []
-		if _current_config.n_cases > 0 and self.in_vars.is_empty() and not job_input_vars_config.is_empty():
-			push_warning("MonteCarloOrchestrator: Job '%s' has n_cases > 0 but no InVars were successfully initialized. Cannot generate cases." % current_job_name)
+		if _current_config.n_cases > 0 and self.in_vars.is_empty() and not _current_config.in_vars.is_empty():
+			push_warning("MonteGodot: Job '%s' has n_cases > 0 but no InVars were successfully initialized. Cannot generate cases." % current_job_name)
 			# This situation might arise if all InVar resources in the config were invalid.
 			# Error handling for this scenario (e.g., skipping the job) is already partially covered by the percentile generation checks.
 
@@ -150,9 +145,9 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			all_cases_for_job.append(case_obj)
 
 		if all_cases_for_job.is_empty() and _current_config.n_cases > 0:
-			push_error("MonteCarloOrchestrator: Job '%s' - Failed to generate cases." % current_job_name)
+			push_error("MonteGodot: Job '%s' - Failed to generate cases." % current_job_name)
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Case generation failed"}}
-			job_completed.emit(current_job_name, [], {"error": "Case generation failed"})
+			job_completed.emit(current_job_name, [], {"error": "Case generation failed"}, {})
 			continue
 
 		var effective_super_batch_size: int = _current_config.super_batch_size
@@ -173,7 +168,7 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			if current_super_batch_cases.is_empty():
 				continue
 
-			print("MonteCarloOrchestrator: Job '%s', Super-batch %d/%d (cases %d-%d) starting." %
+			print("MonteGodot: Job '%s', Super-batch %d/%d (cases %d-%d) starting." %
 				[current_job_name, sb_idx + 1, num_actual_super_batches, super_batch_start_idx, super_batch_end_idx -1])
 
 			# 2a. Preprocessing Stage for Super-batch
@@ -181,7 +176,7 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			for case_obj: Case in current_super_batch_cases:
 				var returned_case_obj: Case = preprocess_case(case_obj)
 				preprocessed_cases.append(returned_case_obj)
-			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - Preprocessing complete (%d tasks prepared for run stage)." % [current_job_name, sb_idx + 1, preprocessed_cases.size()])
+			print("MonteGodot: Job '%s', Super-batch %d - Preprocessing complete (%d tasks prepared for run stage)." % [current_job_name, sb_idx + 1, preprocessed_cases.size()])
 
 			var batch_processor_started: bool = _batch_processor.process(
 				preprocessed_cases, # Pass the collected arrays of arguments
@@ -192,18 +187,18 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			#generate_out_vars(_current_config.inner_batch_size)
 
 			if not batch_processor_started:
-				push_error("MonteCarloOrchestrator: Job '%s', Super-batch %d - Failed to start BatchProcessor." % [current_job_name, sb_idx + 1])
+				push_error("MonteGodot: Job '%s', Super-batch %d - Failed to start BatchProcessor." % [current_job_name, sb_idx + 1])
 				# How to handle this error? For now, log and this SB might be skipped for results collection
 				# Potentially add error markers to cases or job_stats
 				continue # Skip to next super-batch
 			
-			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - BatchProcessor initiated. Waiting..." % [current_job_name, sb_idx + 1])
+			print("MonteGodot: Job '%s', Super-batch %d - BatchProcessor initiated. Waiting..." % [current_job_name, sb_idx + 1])
 			var batch_run_results_for_sb: Array = await _batch_processor.processing_complete
-			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - BatchProcessor completed (%d results)." % [current_job_name, sb_idx + 1, batch_run_results_for_sb.size()])
+			print("MonteGodot: Job '%s', Super-batch %d - BatchProcessor completed (%d results)." % [current_job_name, sb_idx + 1, batch_run_results_for_sb.size()])
 
 			# 4a. Postprocessing Stage for Super-batch
 			if batch_run_results_for_sb.size() != current_super_batch_cases.size():
-				push_warning("MonteCarloOrchestrator: Job '%s', Super-batch %d - Mismatch in case count (%d) and batch results (%d)." %
+				push_warning("MonteGodot: Job '%s', Super-batch %d - Mismatch in case count (%d) and batch results (%d)." %
 					[current_job_name, sb_idx + 1, current_super_batch_cases.size(), batch_run_results_for_sb.size()])
 
 
@@ -211,36 +206,74 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 				var returned_case_obj: Case = postprocess_case(case_obj)
 				collected_processed_cases.append(returned_case_obj)
 			
-			print("MonteCarloOrchestrator: Job '%s', Super-batch %d - Postprocessing complete." % [current_job_name, sb_idx + 1])
+			print("MonteGodot: Job '%s', Super-batch %d - Postprocessing complete." % [current_job_name, sb_idx + 1])
 			
 			collected_processed_cases.append_array(current_super_batch_cases)
 
 		# End of super-batches loop for the current job
 		var overall_job_duration_msec: int = Time.get_ticks_msec() - overall_job_start_time_msec
 
-		var avg_preprocess_sb_msec: float = 0.0
-		var avg_run_sb_msec: float = 0.0
-		var avg_postprocess_sb_msec: float = 0.0
-
 		var job_stats: Dictionary = {
 			"total_execution_time_msec": overall_job_duration_msec,
 			"num_super_batches": num_actual_super_batches,
-			"avg_preprocess_time_per_super_batch_msec": avg_preprocess_sb_msec,
-			"avg_run_time_per_super_batch_msec": avg_run_sb_msec,
-			"avg_postprocess_time_per_super_batch_msec": avg_postprocess_sb_msec,
+			# TODO: Correctly calculate and store actual average times per SB if needed
+			"avg_preprocess_time_per_super_batch_msec": 0.0, 
+			"avg_run_time_per_super_batch_msec": 0.0,
+			"avg_postprocess_time_per_super_batch_msec": 0.0,
 			"cases_processed": collected_processed_cases.size()
 		}
 
-		print("MonteCarloOrchestrator: Job '%s' completed. Total time: %.2f sec." % [current_job_name, float(overall_job_duration_msec) / 1000.0])
-		# For more detailed stats, print job_stats dictionary here if needed
-		# print("Job Stats for '%s': %s" % [current_job_name, job_stats])
+		# --- Create OutVar instances for the completed job --- 
+		var current_job_out_vars: Dictionary = {}
+		if not collected_processed_cases.is_empty():
+			var unique_out_val_names: Dictionary = {} # Use as a set: StringName -> bool
+			for case_obj: Case in collected_processed_cases:
+				var case_out_vals: Array[OutVal] = case_obj.get_output_values()
+				for ov: OutVal in case_out_vals:
+					unique_out_val_names[ov.name] = true
 
-		all_aggregated_results[current_job_name] = {"results": collected_processed_cases, "stats": job_stats}
-		job_completed.emit(current_job_name, collected_processed_cases, job_stats)
+			for out_var_name_sn: StringName in unique_out_val_names.keys():
+				var all_raw_vals_for_name: Array = []
+				# Placeholder for first_case_is_median logic for OutVars.
+				# This might come from JobConfig or be a global setting.
+				var first_is_median_for_outvar: bool = _current_config.first_case_is_median if _current_config else false
+				var valmap_override_for_name: Dictionary = {} # Default to empty, OutVar can auto-gen if needed
+
+				for case_obj: Case in collected_processed_cases:
+					var case_out_vals: Array[OutVal] = case_obj.get_output_values()
+					var found_in_case: bool = false
+					for ov: OutVal in case_out_vals:
+						if ov.name == out_var_name_sn:
+							all_raw_vals_for_name.append(ov.get_raw_data())
+							found_in_case = true
+							break
+					if not found_in_case:
+						all_raw_vals_for_name.append(null) # Append null if specific OutVal not found
+						# Consider if a warning is needed here, or if this is expected behavior
+						# push_warning("MonteGodot: Job '%s', Case %d missing OutVal for '%s'. Appending null." % [current_job_name, case_obj.id, out_var_name_sn])
+				
+				if not all_raw_vals_for_name.is_empty():
+					var new_out_var: OutVar = OutVar.new(
+						out_var_name_sn,
+						all_raw_vals_for_name,
+						valmap_override_for_name,
+						first_is_median_for_outvar
+						# datasource could be passed if relevant
+					)
+					current_job_out_vars[out_var_name_sn] = new_out_var
+				# else: No values collected, OutVar not created for this name.
+
+		job_stats["output_variables_summary"] = current_job_out_vars # Adding the OutVars to stats for now
+		# -----------------------------------------------------
+
+		print("MonteGodot: Job '%s' completed. Total time: %.2f sec." % [current_job_name, float(overall_job_duration_msec) / 1000.0])
+
+		all_aggregated_results[current_job_name] = {"results": collected_processed_cases, "stats": job_stats, "output_vars": current_job_out_vars}
+		job_completed.emit(current_job_name, collected_processed_cases, job_stats, current_job_out_vars)
 
 	_is_running_jobs = false
 	all_jobs_completed.emit(all_aggregated_results)
-	print("MonteCarloOrchestrator: All jobs completed.")
+	print("MonteGodot: All jobs completed.")
 	return OK 
 
 func get_input_vars_typed() -> Array[InVar]:

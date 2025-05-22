@@ -3,8 +3,6 @@
 class_name InVar extends Resource
 
 #region Properties
-var name: StringName ## User-friendly name for the variable.
-var description: String ## A more detailed description of what the variable represents.
 var ndraws: int = 0 ## The number of random draws.
 var var_idx: int = -1 ## The number/index of this input variable.
 var percentiles: Array[float] = [] ## Stores the pre-generated percentiles for this variable for all cases.
@@ -30,6 +28,10 @@ var sample_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.Sa
 #endregion
 
 #region Exported Variables
+@export_category("Description")
+@export var name: StringName ## User-friendly name for the variable.
+@export var description: String ## A more detailed description of what the variable represents.
+
 @export var distribution_type: DistributionType = DistributionType.UNIFORM:
 	set(value):
 		distribution_type = value
@@ -321,79 +323,30 @@ func _generate_value_for_percentile(p_percentile: float) -> Dictionary:
 	if Engine.is_editor_hint():
 		_update_dict_from_exported_fields()
 
-	var debug_mode: bool = ProjectSettings.get_setting("monte_carlo/debug_mode", false)
+	var debug_mode: bool = ProjectSettings.get_setting("monte_godot/debug_mode", false)
 
 	var num: float = 0.0
 	var pct_for_ppf: float = p_percentile
 
-	if not Engine.has_singleton("StatMath"):
-		push_error("StatMath addon is not available. Cannot generate value.")
-		if debug_mode:
-			assert(false, "StatMath addon is not available.")
-		return {"num": 0.0, "pct": p_percentile}
-
 	match distribution_type:
 		DistributionType.UNIFORM:
-			if StatMath.has_method("ppf_uniform"):
-				num = StatMath.ppf_uniform(pct_for_ppf, distribution_params.a, distribution_params.b)
-			else:
-				push_error("StatMath.ppf_uniform not found.")
-				if debug_mode: assert(false, "StatMath.ppf_uniform not found.")
+			num = StatMath.PpfFunctions.uniform_ppf(pct_for_ppf, self.uniform_a, self.uniform_b)
 		DistributionType.NORMAL:
-			if StatMath.has_method("ppf_normal"):
-				num = StatMath.ppf_normal(pct_for_ppf, distribution_params.mean, distribution_params.std_dev)
-			else:
-				push_error("StatMath.ppf_normal not found.")
-				if debug_mode: assert(false, "StatMath.ppf_normal not found.")
+			num = StatMath.PpfFunctions.normal_ppf(pct_for_ppf, self.normal_mean, self.normal_std_dev)
 		DistributionType.BERNOULLI:
-			if StatMath.has_method("ppf_bernoulli"):
-				num = StatMath.ppf_bernoulli(pct_for_ppf, distribution_params.p)
-			else:
-				push_warning("StatMath.ppf_bernoulli not found, using basic threshold. Verify logic.")
-				num = 1.0 if pct_for_ppf > (1.0 - distribution_params.p) else 0.0
+			num = StatMath.PpfFunctions.bernoulli_ppf(pct_for_ppf, self.bernoulli_p)
 		DistributionType.BINOMIAL:
-			if StatMath.has_method("ppf_binomial"):
-				num = float(StatMath.ppf_binomial(pct_for_ppf, distribution_params.n, distribution_params.p))
-			else:
-				push_error("StatMath.ppf_binomial not found.")
-				if debug_mode: assert(false, "StatMath.ppf_binomial not found.")
+			num = float(StatMath.PpfFunctions.binomial_ppf(pct_for_ppf, self.binomial_n, self.binomial_p))
 		DistributionType.POISSON:
-			if StatMath.has_method("ppf_poisson"):
-				num = float(StatMath.ppf_poisson(pct_for_ppf, distribution_params.lambda))
-			else:
-				push_error("StatMath.ppf_poisson not found.")
-				if debug_mode: assert(false, "StatMath.ppf_poisson not found.")
+			num = float(StatMath.PpfFunctions.poisson_ppf(pct_for_ppf, self.poisson_lambda))
 		DistributionType.EXPONENTIAL:
-			if StatMath.has_method("ppf_exponential"):
-				num = StatMath.ppf_exponential(pct_for_ppf, distribution_params.lambda)
-			else:
-				push_error("StatMath.ppf_exponential not found.")
-				if debug_mode: assert(false, "StatMath.ppf_exponential not found.")
+			num = StatMath.PpfFunctions.exponential_ppf(pct_for_ppf, self.exponential_lambda)
 		DistributionType.GEOMETRIC:
-			if StatMath.has_method("ppf_geometric"):
-				num = float(StatMath.ppf_geometric(pct_for_ppf, distribution_params.p))
-			else:
-				push_error("StatMath.ppf_geometric not found.")
-				if debug_mode: assert(false, "StatMath.ppf_geometric not found.")
+			num = float(StatMath.PpfFunctions.geometric_ppf(pct_for_ppf, self.geometric_p))
 		DistributionType.ERLANG:
-			if StatMath.has_method("ppf_gamma"):
-				num = StatMath.ppf_gamma(pct_for_ppf, float(distribution_params.k), distribution_params.lambda)
-			else:
-				push_error("StatMath.ppf_gamma (for Erlang) not found.")
-				if debug_mode: assert(false, "StatMath.ppf_gamma (for Erlang) not found.")
+			num = StatMath.PpfFunctions.gamma_ppf(pct_for_ppf, float(self.erlang_k), self.erlang_lambda)
 		DistributionType.HISTOGRAM:
-			if StatMath.has_method("ppf_discrete_histogram"):
-				num = StatMath.ppf_discrete_histogram(pct_for_ppf, distribution_params.values, distribution_params.probabilities)
-			else:
-				push_warning("StatMath.ppf_discrete_histogram not found. Manual lookup for histogram PPF.")
-				var cumulative_prob: float = 0.0
-				for i in range(distribution_params.probabilities.size()):
-					cumulative_prob += distribution_params.probabilities[i]
-					if pct_for_ppf <= cumulative_prob:
-						num = distribution_params.values[i]
-						break
-				if pct_for_ppf > cumulative_prob and not distribution_params.values.is_empty():
-					num = distribution_params.values[-1]
+			num = StatMath.PpfFunctions.discrete_histogram_ppf(pct_for_ppf, self.histogram_values, self.histogram_probabilities)
 		DistributionType.PSEUDO_RANDOM:
 			push_warning("InVar '%s': PPF for PSEUDO_RANDOM is not straightforward. Returning percentile as num." % resource_name)
 			num = pct_for_ppf

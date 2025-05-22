@@ -5,7 +5,8 @@ class_name OutVal extends Val
 ## @brief Represents a single output value from a simulation case.
 ##
 ## Stores the actual calculated result for a specific output variable
-## within a given case.
+## within a given case, utilizing the raw_data and numeric_data fields
+## inherited from the Val base class.
 
 ## The raw numerical value produced by the simulation's run step.
 var num: float = 0.0
@@ -16,19 +17,23 @@ var val: Variant
 
 
 #region Initialization
-func _init(p_name: StringName, p_n_case: int, p_output_value: Variant):
-	# The super._init(p_name, p_n_case) is called by the .(p_name, p_n_case) syntax
-	self.num_value = p_output_value
-	# mapped_value will remain null unless explicitly set or a valmap is implemented.
+## @param p_name The name of the output variable.
+## @param p_n_case The case index this output value belongs to.
+## @param p_raw_value_for_case The raw output value (e.g., bool, string, float).
+## @param p_numeric_value_for_case Optional. A pre-calculated numeric representation (float).
+## If NAN or not provided, the base Val class will attempt to derive numeric_data from p_raw_value_for_case.
+func _init(p_name: StringName, p_n_case: int, p_raw_value_for_case: Variant, p_numeric_value_for_case: float = NAN):
+	super._init(p_name, p_n_case, p_raw_value_for_case, p_numeric_value_for_case) # Call parent constructor
 #endregion
 
 
 #region Public Methods
-# No specific methods needed for OutVal yet, base Val methods are sufficient.
-# func get_value() -> Variant:
-#   return self.num_value # Base Val.get_value() already does this if mapped_value is null
+# No specific public methods needed for OutVal beyond what Val provides currently.
+# Specific getters like get_raw_data() and get_numeric_data() are inherited.
+# The generic get_value() from Val will return raw_data by default.
 #endregion
 
 
 func _to_string() -> String:
-	return "OutVal(num: %s, val: %s)" % [str(num), str(val)] 
+	# Access inherited properties for the string representation
+	return "OutVal(name: %s, case: %d, raw: %s, numeric: %s)" % [name, n_case, str(raw_data), str(numeric_data)] 

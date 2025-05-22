@@ -1,6 +1,0 @@
-[gd_scene load_steps=2 format=3 uid="uid://dvysj85pm43tb"]
-
-[ext_resource type="Script" uid="uid://dumpwj1mwwssy" path="res://examples/estimate_pi/estimate_pi.gd" id="1_cqyvr"]
-
-[node name="EstimatePi" type="Node"]
-script = ExtResource("1_cqyvr")

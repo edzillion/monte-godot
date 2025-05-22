@@ -19,10 +19,11 @@ config/icon="res://icon.svg"
 
 Utils="*res://scripts/global/utils.gd"
 StatMath="*res://addons/godot-stat-math/stat_math.gd"
+EZSTATS="*res://addons/ez_stats/ezstats.gd"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg", "res://addons/god_plot/plugin.cfg", "res://addons/godot-stat-math/plugin.cfg", "res://addons/numdot/plugin.cfg")
+enabled=PackedStringArray("res://addons/ez_stats/plugin.cfg", "res://addons/gdUnit4/plugin.cfg", "res://addons/god_plot/plugin.cfg", "res://addons/godot-stat-math/plugin.cfg", "res://addons/numdot/plugin.cfg")
 
 [rendering]
 

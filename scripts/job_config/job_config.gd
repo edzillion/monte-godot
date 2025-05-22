@@ -29,6 +29,13 @@ signal configuration_changed
 ## Number of threads to use for processing this job.
 ## A value of 0 or -1 might indicate using WorkerThreadPool.get_max_threads().
 
+@export var first_case_is_median: int = false:
+	set(value):
+		if first_case_is_median != first_case_is_median:
+			first_case_is_median = first_case_is_median
+			configuration_changed.emit()
+
+
 @export_group("Batching")
 @export var super_batch_size: int = 100:
 	set(value):
@@ -45,7 +52,7 @@ signal configuration_changed
 ## Number of cases grouped into an "inner batch" within a super batch.
 
 @export_group("Variables")
-@export var in_vars: Array[Dictionary] = [] # Each Dictionary: {"name": StringName, "distribution": InVar, "num_map": Dictionary, "seed": int}
+@export var in_vars: Array[InVar] = []
 
 @export_group("User Callables")
 ## These callables define the core logic of the simulation.
@@ -90,7 +97,7 @@ func _init(
 	p_preprocess: Callable = Callable(),
 	p_run: Callable = Callable(),
 	p_postprocess: Callable = Callable(),
-	p_in_vars: Array[Dictionary] = [],
+	p_in_vars: Array[InVar] = [],
 	p_other_configs: Dictionary = {}
 ) -> void:
 	job_name = p_job_name
@@ -108,16 +115,15 @@ func _init(
 func get_configured_invar_by_name(variable_name: StringName) -> InVar:
 	## Retrieves a configured InVar instance for a given variable name.
 	## Returns null if the variable_name is not found or if the configuration is invalid.
-	for var_config_dict in in_vars:
-		if var_config_dict.get("name") == variable_name:
-			var dist_source: InVar = var_config_dict.get("distribution")
-			if not dist_source:
+	for in_var in in_vars:
+		if in_var.get("name") == variable_name:			
+			if not in_var.get("distribution"):
 				push_warning("JobConfig ('%s'): No distribution source for variable '%s'." % [job_name, variable_name])
 				return null
 
-			var new_in_var: InVar = dist_source.duplicate() if dist_source else InVar.new()
+			var new_in_var: InVar = in_var.duplicate()
 			
-			var num_map_override: Dictionary = var_config_dict.get("num_map", {})
+			var num_map_override: Dictionary = in_var.get("num_map")
 			if not num_map_override.is_empty():
 				new_in_var.num_map = num_map_override.duplicate(true)
 			
@@ -127,15 +133,6 @@ func get_configured_invar_by_name(variable_name: StringName) -> InVar:
 			
 	push_warning("JobConfig ('%s'): Input variable configuration for '%s' not found." % [job_name, variable_name])
 	return null
-
-
-func get_seed_for_invar(variable_name: StringName) -> int:
-	## Retrieves the seed for a given input variable configuration.
-	## Returns 0 if not found or not specified (indicating default seeding behavior).
-	for var_config_dict in in_vars:
-		if var_config_dict.get("name") == variable_name:
-			return var_config_dict.get("seed", 0) # Default to 0 if no seed key
-	return 0 # Default if variable not found
 
 
 func is_valid() -> bool:
