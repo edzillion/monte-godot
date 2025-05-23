@@ -1,13 +1,17 @@
-[gd_resource type="Resource" script_class="JobConfig" load_steps=2 format=3 uid="uid://df8pvvxdkxx27"]
+[gd_resource type="Resource" script_class="JobConfig" load_steps=4 format=3 uid="uid://df8pvvxdkxx27"]
 
+[ext_resource type="Script" uid="uid://gxkhtbbos2yk" path="res://scripts/var/in_var.gd" id="1_3nwwo"]
 [ext_resource type="Script" uid="uid://dhfvnpa36t4em" path="res://scripts/job_config/job_config.gd" id="1_naehn"]
+[ext_resource type="Resource" uid="uid://bwy87rq4kwxh6" path="res://examples/poker_hands/card_sampler.tres" id="2_cobg0"]
 
 [resource]
 script = ExtResource("1_naehn")
-job_name = "DefaultJob"
-n_cases = 1000
-num_threads = 4
-super_batch_size = 100
-inner_batch_size = 10
+job_name = &"poker_hands_job"
+n_cases = 1000000
+num_threads = -1
+first_case_is_median = 0
+super_batch_size = 1000
+inner_batch_size = 500
+in_vars = Array[ExtResource("1_3nwwo")]([ExtResource("2_cobg0")])
 other_configs = {}
 metadata/_custom_type_script = "uid://dhfvnpa36t4em"

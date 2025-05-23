@@ -21,6 +21,7 @@ enum DistributionType {
 	ERLANG,       # params: {"k": int, "lambda": float}
 	HISTOGRAM,    # params: {"values": Array[float], "probabilities": Array[float]}
 	PSEUDO_RANDOM,# params: {"c": float}
+	SAMPLE_WITHOUT_REPLACEMENT, # params: {"deck_size": int, "sample_count": int, "sample_method_param": SamplingGen.SamplingMethod}
 	CUSTOM        # params: Uses num_map directly or custom logic with distribution_params.
 }
 
@@ -78,6 +79,11 @@ var sample_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.Sa
 @export_category("Pseudo-Random Parameters")
 @export var pseudo_c: float = 0.1
 
+@export_category("Sample Without Replacement Parameters")
+@export var swr_deck_size: int = 52
+@export var swr_sample_count: int = 5
+@export var swr_actual_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.FISHER_YATES
+
 #endregion
 
 ## @brief Optional mapping of numerical values to other data types (e.g., strings, objects).
@@ -91,7 +97,7 @@ var _nums: Array[float] = [] ## Stores the raw numerical values generated from p
 func _init(
 	p_name: StringName = &"", 
 	p_distribution_type: DistributionType = DistributionType.UNIFORM, 
-	p_distribution_params: Dictionary = {}, 
+	p_distribution_params: Dictionary = {},
 	p_description: String = "",
 	p_ndraws: int = 0,
 	p_sample_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.RANDOM,
@@ -125,45 +131,77 @@ func set_distribution_type(value: DistributionType) -> void:
 	if Engine.is_editor_hint():
 		notify_property_list_changed()
 
+
 func get_value(p_case_idx: int) -> InVal:
 	var debug_mode: bool = ProjectSettings.get_setting("monte_carlo/debug_mode", false)
 
+	_update_dict_from_exported_fields() # Ensure params are fresh from editor changes
+
+	if distribution_type == DistributionType.SAMPLE_WITHOUT_REPLACEMENT:
+		var deck_size: int = distribution_params.get("deck_size", 52)
+		var sample_count: int = distribution_params.get("sample_count", 5)
+		var config_sample_method_val = distribution_params.get("sample_method_param", StatMath.SamplingGen.SamplingMethod.FISHER_YATES)
+		
+		var actual_sample_method_to_use: StatMath.SamplingGen.SamplingMethod
+		if config_sample_method_val is StatMath.SamplingGen.SamplingMethod: # If it's already the enum type
+			actual_sample_method_to_use = config_sample_method_val
+		elif config_sample_method_val is int and StatMath.SamplingGen.SamplingMethod.values().has(config_sample_method_val):
+			actual_sample_method_to_use = config_sample_method_val
+		else:
+			push_warning("InVar '%s': Invalid 'sample_method_param' (%s) in distribution_params for SAMPLE_WITHOUT_REPLACEMENT. Defaulting to FISHER_YATES." % [resource_name, str(config_sample_method_val)])
+			actual_sample_method_to_use = StatMath.SamplingGen.SamplingMethod.FISHER_YATES
+
+		if deck_size <= 0 or sample_count <= 0 or sample_count > deck_size:
+			var err_msg_swr = "InVar '%s': Invalid 'deck_size' (%d) or 'sample_count' (%d) for SAMPLE_WITHOUT_REPLACEMENT." % [resource_name, deck_size, sample_count]
+			push_error(err_msg_swr)
+			if debug_mode: assert(false, err_msg_swr)
+			return null
+
+		var raw_val_array: Array[int] = StatMath.SamplingGen.draw_without_replacement(deck_size, sample_count, actual_sample_method_to_use)
+		var mapped_val_output: Array = [] # This will hold the final mapped values or raw values if no map
+
+		if not num_map.is_empty():
+			for item_idx in raw_val_array:
+				if num_map.has(item_idx):
+					mapped_val_output.append(num_map[item_idx])
+				else:
+					mapped_val_output.append(item_idx) # Keep raw item if no map entry for it
+			return InVal.new(raw_val_array, mapped_val_output, -1.0)
+		else:
+			# No num_map, so mapped_val_output should be the raw_val_array itself.
+			return InVal.new(raw_val_array, raw_val_array, -1.0)
+
+	# Original logic for other distribution types that use pre-generated _nums
 	if _nums.is_empty() and not percentiles.is_empty():
-		push_warning("InVar '%s': get_value() called but _nums is empty. Did you forget to call generate_all_values()? Attempting to generate now." % resource_name)
+		push_warning("InVar '%s': get_value() called but _nums is empty for non-SWR type. Did you forget to call generate_all_values()? Attempting to generate now." % resource_name)
 		generate_all_values()
-		# If still empty, then there was an issue (e.g. no percentiles)
 		if _nums.is_empty() and ndraws > 0:
-			push_error("InVar '%s': Failed to populate _nums even after calling generate_all_values(). Check percentile data and ndraws." % resource_name)
-			if debug_mode: assert(false, "InVar '%s': _nums empty after generation attempt." % resource_name)
-			return InVal.new(0.0, 0.0, -1.0) # num, mapped_val, pct
+			push_error("InVar '%s': Failed to populate _nums for non-SWR type. Check percentile data and ndraws." % resource_name)
+			if debug_mode: assert(false, "InVar '%s': _nums empty after generation attempt for non-SWR type." % resource_name)
+			return InVal.new(0.0, 0.0, -1.0)
 
 	if p_case_idx < 0 or p_case_idx >= _nums.size():
-		var err_msg = "InVar '%s': Case index %d is out of bounds for _nums (size: %d)." % [resource_name, p_case_idx, _nums.size()]
+		var err_msg = "InVar '%s': Case index %d is out of bounds for _nums (size: %d) for non-SWR type." % [resource_name, p_case_idx, _nums.size()]
 		push_error(err_msg)
 		if debug_mode: assert(false, err_msg)
-		return InVal.new(0.0, 0.0, -1.0) # Return a default/error InVal
+		return InVal.new(0.0, 0.0, -1.0)
 
-	var raw_num: float = _nums[p_case_idx]
-	var raw_pct: float = -1.0
+	var raw_num_single: float = _nums[p_case_idx]
+	var raw_pct_single: float = -1.0
 
 	if p_case_idx < 0 or p_case_idx >= percentiles.size():
-		var err_msg_pct = "InVar '%s': Case index %d is out of bounds for percentiles array (size: %d). Cannot retrieve percentile." % [resource_name, p_case_idx, percentiles.size()]
-		push_warning(err_msg_pct) # Warning because we can still proceed with the raw_num
+		var err_msg_pct = "InVar '%s': Case index %d is out of bounds for percentiles array (size: %d) for non-SWR type. Cannot retrieve percentile." % [resource_name, p_case_idx, percentiles.size()]
+		push_warning(err_msg_pct)
 	else:
-		raw_pct = percentiles[p_case_idx]
+		raw_pct_single = percentiles[p_case_idx]
 
-	var mapped_val: Variant = raw_num
+	var mapped_val_single: Variant = raw_num_single
 	if not num_map.is_empty():
-		# Attempt to find the raw_num or a close floating point match in num_map keys
-		# Direct dictionary key lookup for floats can be problematic due to precision.
-		# For now, direct lookup. Consider a more robust lookup if issues arise.
-		if num_map.has(raw_num):
-			mapped_val = num_map[raw_num]
-		# else: consider warning if a map exists but no key matches, if that's unexpected.
+		if num_map.has(raw_num_single): # This assumes num_map keys are appropriate for float values for other types
+			mapped_val_single = num_map[raw_num_single]
 	
-	# The InVal constructor needs to be: InVal.new(p_num: float, p_mapped_val: Variant, p_percentile: float)
-	# Make sure InVal.gd is updated to match this signature and store the percentile.
-	return InVal.new(raw_num, mapped_val, raw_pct)
+	return InVal.new(raw_num_single, mapped_val_single, raw_pct_single)
+
 
 func _update_distribution_info() -> void:
 	match distribution_type:
@@ -187,6 +225,8 @@ func _update_distribution_info() -> void:
 			distribution_info = "Histogram params: {values: Array[float], probabilities: Array[float]}"
 		DistributionType.PSEUDO_RANDOM:
 			distribution_info = "Pseudo-Random (Warcraft3/Dota) param: {c: float}"
+		DistributionType.SAMPLE_WITHOUT_REPLACEMENT:
+			distribution_info = "Sample w/o Replacement params: {deck_size: int, sample_count: int, sample_method_param: SamplingGen.SamplingMethod}"
 		DistributionType.CUSTOM:
 			distribution_info = "Custom. Uses num_map or custom logic in distribution_params."
 		_:
@@ -220,6 +260,10 @@ func _update_exported_fields_from_dict(params: Dictionary) -> void:
 			histogram_probabilities = params.get("probabilities", [])
 		DistributionType.PSEUDO_RANDOM:
 			pseudo_c = params.get("c", 0.1)
+		DistributionType.SAMPLE_WITHOUT_REPLACEMENT:
+			swr_deck_size = params.get("deck_size", 52)
+			swr_sample_count = params.get("sample_count", 5)
+			swr_actual_method = params.get("sample_method_param", StatMath.SamplingGen.SamplingMethod.FISHER_YATES)
 		DistributionType.CUSTOM: pass
 		_: 
 			push_error("Unsupported distribution type: %s" % DistributionType.keys()[distribution_type])
@@ -247,6 +291,12 @@ func _update_dict_from_exported_fields() -> void:
 			distribution_params = {"values": histogram_values, "probabilities": histogram_probabilities}
 		DistributionType.PSEUDO_RANDOM:
 			distribution_params = {"c": pseudo_c}
+		DistributionType.SAMPLE_WITHOUT_REPLACEMENT:
+			distribution_params = {
+				"deck_size": swr_deck_size, 
+				"sample_count": swr_sample_count,
+				"sample_method_param": swr_actual_method
+				}
 		DistributionType.CUSTOM: pass
 		_: 
 			push_error("Unsupported distribution type: %s" % DistributionType.keys()[distribution_type])
@@ -294,7 +344,10 @@ func _validate_property(property: Dictionary) -> void:
 		DistributionType.PSEUDO_RANDOM:
 			if prop_name == &"pseudo_c": 
 				show_prop = true
-		DistributionType.CUSTOM: pass
+		DistributionType.SAMPLE_WITHOUT_REPLACEMENT:
+			if prop_name in [&"swr_deck_size", &"swr_sample_count", &"swr_actual_method"]:
+				show_prop = true
+		DistributionType.CUSTOM: pass # Custom shows no specific params by default here
 		_: 
 			push_error("Unsupported distribution type: %s" % DistributionType.keys()[distribution_type])
 
@@ -308,7 +361,8 @@ func _validate_property(property: Dictionary) -> void:
 		&"geometric_p",
 		&"erlang_k", &"erlang_lambda",
 		&"histogram_values", &"histogram_probabilities",
-		&"pseudo_c"
+		&"pseudo_c",
+		&"swr_deck_size", &"swr_sample_count", &"swr_actual_method"
 	]
 
 	if prop_name in all_param_props:
@@ -350,6 +404,10 @@ func _generate_value_for_percentile(p_percentile: float) -> Dictionary:
 		DistributionType.PSEUDO_RANDOM:
 			push_warning("InVar '%s': PPF for PSEUDO_RANDOM is not straightforward. Returning percentile as num." % resource_name)
 			num = pct_for_ppf
+		DistributionType.SAMPLE_WITHOUT_REPLACEMENT: # This case should ideally not be hit if get_value handles it directly
+			push_error("InVar '%s': _generate_value_for_percentile should not be called for SAMPLE_WITHOUT_REPLACEMENT." % resource_name)
+			num = -1.0 # Error or placeholder
+			if debug_mode: assert(false, "_generate_value_for_percentile called for SAMPLE_WITHOUT_REPLACEMENT")
 		DistributionType.CUSTOM:
 			if num_map.has(pct_for_ppf):
 				num = num_map[pct_for_ppf]
@@ -364,13 +422,19 @@ func _generate_value_for_percentile(p_percentile: float) -> Dictionary:
 	return {"num": num, "pct": pct_for_ppf}
 
 func generate_all_values() -> void:
+	# For SAMPLE_WITHOUT_REPLACEMENT, values are generated on-the-fly in get_value().
+	# This function primarily pertains to percentile-based distributions.
+	if distribution_type == DistributionType.SAMPLE_WITHOUT_REPLACEMENT:
+		_nums.clear() # Ensure _nums is clear as it's not used for SWR
+		return
+
 	_nums.clear()
 	if percentiles.is_empty() and ndraws > 0:
 		# If ndraws is set but percentiles aren't, it implies they should have been generated by SimManager
 		push_warning("InVar '%s': generate_all_values() called with no percentiles but ndraws = %d. Values will not be generated." % [resource_name, ndraws])
 		return
 	if percentiles.is_empty() and ndraws == 0:
-		# No percentiles and no draws expected, so nothing to do.
+		# No percentiles and no samples expected, so nothing to do.
 		return
 
 	for p_idx in range(percentiles.size()):
@@ -381,6 +445,6 @@ func generate_all_values() -> void:
 	
 	# Validate sizes if ndraws was specified and we have percentiles
 	if ndraws > 0 and not percentiles.is_empty() and _nums.size() != percentiles.size():
-		push_error("InVar '%s': Mismatch! Drawn values (%d) vs Percentiles (%d). Expected based on ndraws: %d" % [resource_name, _nums.size(), percentiles.size(), ndraws])
+		push_error("InVar '%s': Mismatch! Sampled values (%d) vs Percentiles (%d). Expected based on ndraws: %d" % [resource_name, _nums.size(), percentiles.size(), ndraws])
 	elif ndraws > 0 and _nums.size() != ndraws and not percentiles.is_empty(): # Check against ndraws if percentiles were used
-		push_warning("InVar '%s': Number of drawn values (%d) does not match ndraws (%d), but matches percentiles array size (%d)." % [resource_name, _nums.size(), ndraws, percentiles.size()])
+		push_warning("InVar '%s': Number of sampled values (%d) does not match ndraws (%d), but matches percentiles array size (%d)." % [resource_name, _nums.size(), ndraws, percentiles.size()])

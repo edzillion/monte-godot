@@ -49,14 +49,7 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		_current_config = job_config
 		var overall_job_start_time_msec: int = Time.get_ticks_msec()
 		var num_actual_super_batches: int = 0
-
-		var current_job_name: String = "UnnamedJob"
-		if _current_config:
-			current_job_name = _current_config.job_name
-		else:
-			push_warning("MonteGodot: Encountered a null JobConfig. Skipping.")
-			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Skipped - Null JobConfig"}}
-			continue
+		var current_job_name = _current_config.job_name
 
 		if not _current_config.is_valid():
 			push_warning("MonteGodot: Skipping invalid JobConfig: '%s'" % current_job_name)
@@ -198,17 +191,37 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 
 			# 4a. Postprocessing Stage for Super-batch
 			if batch_run_results_for_sb.size() != current_super_batch_cases.size():
-				push_warning("MonteGodot: Job '%s', Super-batch %d - Mismatch in case count (%d) and batch results (%d)." %
+				push_warning("MonteGodot: Job '%s', Super-batch %d - Mismatch in case count (%d) and batch results (%d). Results might be misaligned." %
 					[current_job_name, sb_idx + 1, current_super_batch_cases.size(), batch_run_results_for_sb.size()])
+				# Continue processing with potentially misaligned data, or handle error more strictly?
+				# For now, we'll proceed but this warning is critical.
 
+			for i: int in range(current_super_batch_cases.size()):
+				var original_case_obj: Case = current_super_batch_cases[i]
+				
+				if i < batch_run_results_for_sb.size() and batch_run_results_for_sb[i] is Case:
+					var processed_case_data: Case = batch_run_results_for_sb[i]
+					# Transfer results from the processed_case_data (from BatchProcessor) 
+					# to the original_case_obj.
+					original_case_obj.run_output = processed_case_data.run_output
+					original_case_obj.start_time_msec = processed_case_data.start_time_msec
+					original_case_obj.end_time_msec = processed_case_data.end_time_msec
+					original_case_obj.runtime_msec = processed_case_data.runtime_msec
+					# Any other fields set by run_case should be transferred here if necessary.
+					# Note: sim_input_args was already on original_case_obj from its own preprocess_case call.
+				else:
+					# Handle missing or mismatched result for this case
+					push_warning("MonteGodot: Job '%s', Super-batch %d, Case index %d - Missing or invalid result from BatchProcessor. Postprocessing may use stale/no run_output." % [current_job_name, sb_idx + 1, original_case_obj.id if original_case_obj else i])
+					# original_case_obj.run_output might remain empty or from a previous state.
 
-			for case_obj: Case in current_super_batch_cases:
-				var returned_case_obj: Case = postprocess_case(case_obj)
-				collected_processed_cases.append(returned_case_obj)
+				# Now call postprocess_case on the original_case_obj, which now has the correct run_output.
+				var postprocessed_original_case: Case = postprocess_case(original_case_obj)
+				collected_processed_cases.append(postprocessed_original_case) 
+				# Assuming postprocess_case modifies original_case_obj and returns it, 
+				# or that collected_processed_cases should store these.
+				# Current postprocess_case adds OutVals to the passed Case and returns it.
 			
 			print("MonteGodot: Job '%s', Super-batch %d - Postprocessing complete." % [current_job_name, sb_idx + 1])
-			
-			collected_processed_cases.append_array(current_super_batch_cases)
 
 		# End of super-batches loop for the current job
 		var overall_job_duration_msec: int = Time.get_ticks_msec() - overall_job_start_time_msec
@@ -296,7 +309,7 @@ func preprocess_case(case_obj: Case) -> Case:
 func run_case(case: Case) -> Case:
 	case.stage = Case.CaseStage.RUN
 	case.start_time_msec = Time.get_ticks_msec()
-	var case_args: Array = case.sim_input_args.map(func(arg): return arg.get_value())
+	var case_args: Array[int] = case.sim_input_args
 	case.run_output = _current_config.run_callable.call(case_args)
 	case.end_time_msec = Time.get_ticks_msec()
 	case.runtime_msec = case.end_time_msec - case.start_time_msec	

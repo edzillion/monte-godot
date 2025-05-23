@@ -6,7 +6,7 @@ class_name JobConfig extends Resource
 
 signal configuration_changed
 
-@export var job_name: String = "DefaultJob":
+@export var job_name: StringName = &"UnnamedJob":
 	set(value):
 		if job_name != value:
 			job_name = value
@@ -147,9 +147,5 @@ func is_valid() -> bool:
 		return false
 	if n_cases <= 0:
 		push_warning("JobConfig '%s': n_cases must be positive." % job_name)
-		return false
-	if num_threads <= 0:
-		# Consider allowing -1 for auto-detection of max threads later
-		push_warning("JobConfig '%s': num_threads must be positive." % job_name)
 		return false
 	return true 

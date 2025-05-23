@@ -8,14 +8,6 @@ class_name OutVal extends Val
 ## within a given case, utilizing the raw_data and numeric_data fields
 ## inherited from the Val base class.
 
-## The raw numerical value produced by the simulation's run step.
-var num: float = 0.0
-
-## The potentially mapped value, after applying any num_map defined in an OutVar.
-## This could be a string, a different number, or any other data type.
-var val: Variant
-
-
 #region Initialization
 ## @param p_name The name of the output variable.
 ## @param p_n_case The case index this output value belongs to.
@@ -36,4 +28,4 @@ func _init(p_name: StringName, p_n_case: int, p_raw_value_for_case: Variant, p_n
 
 func _to_string() -> String:
 	# Access inherited properties for the string representation
-	return "OutVal(name: %s, case: %d, raw: %s, numeric: %s)" % [name, n_case, str(raw_data), str(numeric_data)] 
+	return "OutVal(name: %s, case: %d, raw_data: %s, numeric_data: %s)" % [name, n_case, str(raw_data), str(numeric_data)] 
