@@ -6,7 +6,7 @@ class_name InVal extends RefCounted
 ## its potentially mapped value, and the percentile it represents.
 
 ## The raw numerical value drawn from the probability distribution.
-var raw_value: float = 0.0
+var raw_value: Variant
 
 ## The potentially mapped value, if a num_map was used (e.g., string, different number).
 ## Defaults to raw_value if no mapping occurs.
@@ -18,7 +18,7 @@ var mapped_value: Variant
 var percentile: float = -1.0 
 
 
-func _init(p_raw_value: float, p_mapped_value: Variant = null, p_percentile: float = -1.0) -> void:
+func _init(p_raw_value: Variant, p_mapped_value: Variant = null, p_percentile: float = -1.0) -> void:
 	raw_value = p_raw_value
 	if p_mapped_value != null:
 		mapped_value = p_mapped_value

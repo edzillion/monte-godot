@@ -1,0 +1,28 @@
+[gd_resource type="Resource" script_class="InVar" load_steps=2 format=3 uid="uid://bwy87rq4kwxh6"]
+
+[ext_resource type="Script" uid="uid://gxkhtbbos2yk" path="res://scripts/var/in_var.gd" id="1_s0ghk"]
+
+[resource]
+script = ExtResource("1_s0ghk")
+name = &"card_sampler"
+description = "Sample without replacement for cards."
+distribution_type = 10
+uniform_a = 0.0
+uniform_b = 1.0
+normal_mean = 0.0
+normal_std_dev = 1.0
+bernoulli_p = 0.5
+binomial_n = 1
+binomial_p = 0.5
+poisson_lambda = 1.0
+exponential_lambda = 1.0
+geometric_p = 0.5
+erlang_k = 1
+erlang_lambda = 1.0
+histogram_values = Array[float]([])
+histogram_probabilities = Array[float]([])
+pseudo_c = 0.1
+swr_deck_size = 52
+swr_sample_count = 5
+swr_actual_method = 6
+metadata/_custom_type_script = "uid://gxkhtbbos2yk"

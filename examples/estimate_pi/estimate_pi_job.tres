@@ -7,7 +7,7 @@
 
 [resource]
 script = ExtResource("1_rseo3")
-job_name = "DefaultJob"
+job_name = &"estimate_pi_job"
 n_cases = 1000
 num_threads = 4
 first_case_is_median = 0

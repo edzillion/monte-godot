@@ -6,7 +6,7 @@ class_name JobConfig extends Resource
 
 signal configuration_changed
 
-@export var job_name: String = "DefaultJob":
+@export var job_name: StringName = &"UnnamedJob":
 	set(value):
 		if job_name != value:
 			job_name = value
@@ -29,11 +29,21 @@ signal configuration_changed
 ## Number of threads to use for processing this job.
 ## A value of 0 or -1 might indicate using WorkerThreadPool.get_max_threads().
 
-@export var first_case_is_median: int = false:
+
+## If true, the first case generated will represent the median values of all InVars.
+@export var first_case_is_median: bool = false:
 	set(value):
-		if first_case_is_median != first_case_is_median:
-			first_case_is_median = first_case_is_median
+		if first_case_is_median != value:
+			first_case_is_median = value
 			configuration_changed.emit()
+
+## If true, the case data will be saved to a file.
+@export var save_case_data: bool = false:
+	set(value)	:
+		if save_case_data != value:
+			save_case_data = value
+			configuration_changed.emit()
+
 
 
 @export_group("Batching")
@@ -147,9 +157,5 @@ func is_valid() -> bool:
 		return false
 	if n_cases <= 0:
 		push_warning("JobConfig '%s': n_cases must be positive." % job_name)
-		return false
-	if num_threads <= 0:
-		# Consider allowing -1 for auto-detection of max threads later
-		push_warning("JobConfig '%s': num_threads must be positive." % job_name)
 		return false
 	return true 
