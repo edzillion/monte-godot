@@ -98,69 +98,80 @@ func _final_post_process(all_job_results: Dictionary) -> void:
 
 	var total_valid_hands_counted: int = 0
 
-	# Get results for the specific poker job
 	if not all_job_results.has(poker_hands_job.job_name):
 		print("ERROR: Results for job '%s' not found in all_job_results." % poker_hands_job.job_name)
 		return
 	
 	var poker_job_data: Dictionary = all_job_results[poker_hands_job.job_name]
-	# The structure from MonteGodot signal all_jobs_completed is:
-	# { "job_name": {"results": Array[Case], "stats": Dictionary, "output_vars": Dictionary} }
-	# We need the "results" array which contains the Case objects.
-	if not poker_job_data.has("results"):
-		print("ERROR: 'results' array (of Case objects) not found in data for job '%s'." % poker_hands_job.job_name)
-		return
 
-	var case_results_array: Array = poker_job_data["results"] # This should be Array[Case]
-	
-	print("DEBUG: poker_hands_job.n_cases (from JobConfig): %d" % poker_hands_job.n_cases)
-	print("DEBUG: case_results_array.size() (received in _final_post_process): %d" % case_results_array.size())
-
-
-	if not case_results_array is Array:
-		push_error("ERROR: 'results' for job '%s' is not an Array. Type: %s" % [poker_hands_job.job_name, typeof(case_results_array)])
+	# Check for the output_vars dictionary
+	if not poker_job_data.has("output_vars"):
+		print("ERROR: 'output_vars' dictionary not found in data for job '%s'." % poker_hands_job.job_name)
 		return
 	
-	if case_results_array.is_empty():
-		print("No cases were processed or returned for job: '%s'" % poker_hands_job.job_name)
+	var output_vars_dict: Dictionary = poker_job_data["output_vars"]
+	const HAND_TYPE_OUTVAR_NAME: StringName = &"HandTypeResult"
+
+	if not output_vars_dict.has(HAND_TYPE_OUTVAR_NAME):
+		print("ERROR: OutVar '%s' not found in output_vars for job '%s'." % [HAND_TYPE_OUTVAR_NAME, poker_hands_job.job_name])
+		# This can happen if no cases produced this OutVal, or if OutVar creation failed.
+		# Check MonteGodot logs if this occurs unexpectedly.
 		return
 
-	const HAND_TYPE_OUTVAL_NAME: StringName = &"HandTypeResult"
-
-	for case_object in case_results_array:
-		if not case_object is Case:
-			push_warning("Item in results array is not a Case object for job '%s'. Skipping." % poker_hands_job.job_name)
-			continue
-
-		var output_values_from_case: Array[OutVal] = case_object.get_output_values()
-		var found_hand_type_outval: bool = false
-		for out_val_instance in output_values_from_case:
-			if out_val_instance.name == HAND_TYPE_OUTVAL_NAME:
-				found_hand_type_outval = true
-				var hand_type_val: Variant = out_val_instance.get_value() # Or get_raw_data() if that's more appropriate
-
-				if hand_type_val is PokerHands.HandTypes:
-					if hand_counts.has(hand_type_val):
-						hand_counts[hand_type_val] += 1
-						total_valid_hands_counted += 1
-				elif hand_type_val is int and HandTypes.values().has(hand_type_val):
-					var enum_key_from_int = HandTypes.values()[hand_type_val]
-					if hand_counts.has(enum_key_from_int):
-						hand_counts[enum_key_from_int] += 1
-						total_valid_hands_counted += 1
-				else:
-					push_warning("Case %d: OutVal '%s' had unexpected value type: %s, value: %s" % [case_object.id, HAND_TYPE_OUTVAL_NAME, typeof(hand_type_val), str(hand_type_val)])
-				break # Found the OutVal we care about for this case
-		
-		if not found_hand_type_outval:
-			push_warning("Case %d: Did not find OutVal with name '%s'." % [case_object.id, HAND_TYPE_OUTVAL_NAME])
-
-
-	if total_valid_hands_counted == 0:
-		print("No valid poker hands were successfully processed and counted from OutVar data.")
+	var hand_type_outvar: OutVar = output_vars_dict[HAND_TYPE_OUTVAR_NAME]
+	if not hand_type_outvar is OutVar:
+		print("ERROR: Item '%s' in output_vars is not an OutVar object for job '%s'. Type: %s" % [HAND_TYPE_OUTVAR_NAME, poker_hands_job.job_name, typeof(hand_type_outvar)])
 		return
 
-	print("Total Valid Hands Counted: %d" % total_valid_hands_counted)
+	var all_hand_type_results: Array = hand_type_outvar.get_all_raw_values()
+
+	# The JobConfig might have save_case_data = false, in which case poker_job_data["results"] will be empty.
+	# We should rely on n_cases from JobConfig for total expected, and count from OutVar for processed.
+	var expected_n_cases: int = poker_hands_job.n_cases
+	print("DEBUG: poker_hands_job.n_cases (from JobConfig): %d" % expected_n_cases)
+	print("DEBUG: all_hand_type_results.size() (from OutVar '%s'): %d" % [HAND_TYPE_OUTVAR_NAME, all_hand_type_results.size()])
+
+	if all_hand_type_results.is_empty() and expected_n_cases > 0:
+		print("No hand type results were found in OutVar '%s', though %d cases were expected for job '%s'." % [HAND_TYPE_OUTVAR_NAME, expected_n_cases, poker_hands_job.job_name])
+		# This might be normal if, for example, all run_callable calls returned empty arrays or failed before OutVal creation.
+		# However, if OutVals were expected, check _poker_hands_postprocess and MonteGodot logs.
+		# For now, we'll proceed, and total_valid_hands_counted will remain 0.
+	elif all_hand_type_results.is_empty() and expected_n_cases == 0:
+		print("No cases were configured for job '%s', so no hand type results." % poker_hands_job.job_name)
+		return # Nothing more to do.
+
+	for hand_type_val in all_hand_type_results:
+		if hand_type_val is PokerHands.HandTypes:
+			if hand_counts.has(hand_type_val):
+				hand_counts[hand_type_val] += 1
+				total_valid_hands_counted += 1
+			else:
+				# This case implies an enum value exists in HandTypes but wasn't initialized in hand_counts
+				# which should not happen if HandTypes.values() is used for init.
+				push_warning("PokerHands _final_post_process: Encountered HandType '%s' which was not pre-initialized in hand_counts." % HandTypes.keys()[hand_type_val])
+		elif hand_type_val is int and HandTypes.values().has(hand_type_val): # Corrected enum check
+			var enum_key_from_int = hand_type_val # The int itself is the enum key/value
+			if hand_counts.has(enum_key_from_int):
+				hand_counts[enum_key_from_int] += 1
+				total_valid_hands_counted += 1
+			else:
+				push_warning("PokerHands _final_post_process: Encountered integer HandType value '%d' which was not pre-initialized in hand_counts." % enum_key_from_int)
+		elif hand_type_val == null:
+			push_warning("PokerHands _final_post_process: Encountered a null hand_type_val in OutVar results. This might indicate a case failed or an OutVal was not properly set.")
+		else:
+			push_warning("PokerHands _final_post_process: OutVar '%s' had unexpected value type: %s, value: %s" % [HAND_TYPE_OUTVAR_NAME, typeof(hand_type_val), str(hand_type_val)])
+
+
+	if total_valid_hands_counted == 0 and expected_n_cases > 0:
+		print("No valid poker hands were successfully processed and counted from OutVar data, though %d cases were run." % expected_n_cases)
+		# Further checks might be needed here depending on expectations.
+		return
+	elif total_valid_hands_counted == 0 and expected_n_cases == 0:
+		print("No poker hands to count as no cases were run.")
+		get_tree().quit() # Quit if no cases were run and nothing to process
+		return
+
+	print("Total Valid Hands Counted from OutVar: %d" % total_valid_hands_counted)
 	for hand_type_enum_value_display in HandTypes.values(): 
 		var hand_name: String = HandTypes.keys()[hand_type_enum_value_display] 
 		var count: int = hand_counts.get(hand_type_enum_value_display, 0) 

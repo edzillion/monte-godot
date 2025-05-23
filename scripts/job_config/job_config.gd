@@ -29,11 +29,21 @@ signal configuration_changed
 ## Number of threads to use for processing this job.
 ## A value of 0 or -1 might indicate using WorkerThreadPool.get_max_threads().
 
-@export var first_case_is_median: int = false:
+
+## If true, the first case generated will represent the median values of all InVars.
+@export var first_case_is_median: bool = false:
 	set(value):
-		if first_case_is_median != first_case_is_median:
-			first_case_is_median = first_case_is_median
+		if first_case_is_median != value:
+			first_case_is_median = value
 			configuration_changed.emit()
+
+## If true, the case data will be saved to a file.
+@export var save_case_data: bool = false:
+	set(value)	:
+		if save_case_data != value:
+			save_case_data = value
+			configuration_changed.emit()
+
 
 
 @export_group("Batching")

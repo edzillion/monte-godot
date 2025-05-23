@@ -51,6 +51,9 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		var num_actual_super_batches: int = 0
 		var current_job_name = _current_config.job_name
 
+		# Temporary debug print for n_cases used by MonteGodot for this job
+		print("DEBUG MonteGodot: Job '%s' using n_cases: %d" % [current_job_name, _current_config.n_cases])
+
 		if not _current_config.is_valid():
 			push_warning("MonteGodot: Skipping invalid JobConfig: '%s'" % current_job_name)
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Skipped - Invalid Config"}}
@@ -113,76 +116,73 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		print("MonteGodot: Starting job '%s' (n_cases: %d, threads: %d, super_batch_size: %d, inner_batch_size: %d)." %
 			[current_job_name, _current_config.n_cases, _current_config.num_threads, _current_config.super_batch_size, _current_config.inner_batch_size])
 
-		# 1. Generate All Cases for the Job (once)
-		var all_cases_for_job: Array[Case] = []
-		if _current_config.n_cases > 0 and self.in_vars.is_empty() and not _current_config.in_vars.is_empty():
-			push_warning("MonteGodot: Job '%s' has n_cases > 0 but no InVars were successfully initialized. Cannot generate cases." % current_job_name)
-			# This situation might arise if all InVar resources in the config were invalid.
-			# Error handling for this scenario (e.g., skipping the job) is already partially covered by the percentile generation checks.
-
-		for i: int in range(_current_config.n_cases):
-			var case_obj: Case = Case.new(i) # i is the case_idx
-			
-			# Iterate through the initialized InVar instances for this job
-			# We need to ensure they are added in the order of their var_idx for consistency
-			# if downstream code relies on input_value index.
-			var sorted_in_vars: Array[InVar] = get_input_vars_typed()
-			# Sort InVars by their var_idx to ensure deterministic order of InVals in Case
-			sorted_in_vars.sort_custom(func(a: InVar, b: InVar): return a.var_idx < b.var_idx)
-
-			for in_var_instance: InVar in sorted_in_vars:
-				# Get the specific InVal for this InVar and this case_idx (i)
-				var specific_in_val: InVal = in_var_instance.get_value(i) 
-				case_obj.add_input_value(specific_in_val)
-			
-			all_cases_for_job.append(case_obj)
-
-		if all_cases_for_job.is_empty() and _current_config.n_cases > 0:
-			push_error("MonteGodot: Job '%s' - Failed to generate cases." % current_job_name)
-			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Case generation failed"}}
-			job_completed.emit(current_job_name, [], {"error": "Case generation failed"}, {})
-			continue
+		# InVars are initialized and have their _drawn_values generated for all n_cases here.
+		# We will now generate Case objects per super-batch instead of all at once.
 
 		var effective_super_batch_size: int = _current_config.super_batch_size
-		if effective_super_batch_size <= 0 or effective_super_batch_size > all_cases_for_job.size():
-			effective_super_batch_size = all_cases_for_job.size()
+		# Ensure effective_super_batch_size is at least 1 if n_cases > 0, and not larger than n_cases
+		if _current_config.n_cases > 0:
+			if effective_super_batch_size <= 0 or effective_super_batch_size > _current_config.n_cases:
+				effective_super_batch_size = _current_config.n_cases
+		else: # n_cases is 0
+			effective_super_batch_size = 0 # No batches if no cases
 
 		num_actual_super_batches = 0
-		if not all_cases_for_job.is_empty(): # only calculate if there are cases
-			num_actual_super_batches = ceil(float(all_cases_for_job.size()) / effective_super_batch_size) if effective_super_batch_size > 0 else 1
+		if _current_config.n_cases > 0 and effective_super_batch_size > 0:
+			num_actual_super_batches = ceil(float(_current_config.n_cases) / effective_super_batch_size)
+		elif _current_config.n_cases > 0: # e.g. n_cases = 10, effective_super_batch_size became n_cases
+			num_actual_super_batches = 1
 
-		var collected_processed_cases: Array[Case] = [] # Cases are modified in-place, this collects references
+		var collected_processed_cases: Array[Case] = [] # Conditionally populated if _current_config.save_case_data is true
+		var job_outputs_raw_data: Dictionary = {} # StringName (OutVal.name) -> Array (of raw OutVal data)
+		var current_job_out_vars: Dictionary = {} # StringName (OutVar.name) -> OutVar instance
+		
+		var sorted_in_vars: Array[InVar] = get_input_vars_typed()
+		# Sort InVars by their var_idx once, if needed for consistent InVal order in Cases.
+		# Assuming get_input_vars_typed() and subsequent usage preserve any intended order or that order is managed by var_idx.
+		sorted_in_vars.sort_custom(func(a: InVar, b: InVar): return a.var_idx < b.var_idx)
 
 		for sb_idx: int in range(num_actual_super_batches):
 			var super_batch_start_idx: int = sb_idx * effective_super_batch_size
-			var super_batch_end_idx: int = min(super_batch_start_idx + effective_super_batch_size, all_cases_for_job.size())
-			var current_super_batch_cases: Array[Case] = all_cases_for_job.slice(super_batch_start_idx, super_batch_end_idx)
+			var super_batch_end_idx: int = min(super_batch_start_idx + effective_super_batch_size, _current_config.n_cases)
+			
+			var cases_for_this_super_batch: Array[Case] = []
+			# 1. Generate Cases for the current super-batch
+			if _current_config.n_cases > 0 and self.in_vars.is_empty() and not _current_config.in_vars.is_empty():
+				push_warning("MonteGodot: Job '%s', Super-batch %d - Has n_cases > 0 but no InVars were successfully initialized. Cannot generate cases for this batch." % [current_job_name, sb_idx + 1])
+				continue # Skip this super-batch
+			
+			for i: int in range(super_batch_start_idx, super_batch_end_idx): # Loop for current super-batch cases
+				var case_obj: Case = Case.new(i) # i is the global case_idx
+				for in_var_instance: InVar in sorted_in_vars:
+					var specific_in_val: InVal = in_var_instance.get_value(i) 
+					case_obj.add_input_value(specific_in_val)
+				cases_for_this_super_batch.append(case_obj)
 
-			if current_super_batch_cases.is_empty():
+			if cases_for_this_super_batch.is_empty() and (super_batch_end_idx - super_batch_start_idx > 0):
+				push_error("MonteGodot: Job '%s', Super-batch %d - Failed to generate cases for this batch (%d-%d)." % [current_job_name, sb_idx + 1, super_batch_start_idx, super_batch_end_idx -1])
+				continue # Skip this super-batch
+			elif cases_for_this_super_batch.is_empty(): # No cases to process in this range
 				continue
 
-			print("MonteGodot: Job '%s', Super-batch %d/%d (cases %d-%d) starting." %
-				[current_job_name, sb_idx + 1, num_actual_super_batches, super_batch_start_idx, super_batch_end_idx -1])
+			print("MonteGodot: Job '%s', Super-batch %d/%d (cases %d-%d) starting. Contains %d cases." %
+				[current_job_name, sb_idx + 1, num_actual_super_batches, super_batch_start_idx, super_batch_end_idx -1, cases_for_this_super_batch.size()])
 
 			# 2a. Preprocessing Stage for Super-batch
-			var preprocessed_cases: Array[Case] # Stores the arrays of cases for the batch processor
-			for case_obj: Case in current_super_batch_cases:
-				var returned_case_obj: Case = preprocess_case(case_obj)
-				preprocessed_cases.append(returned_case_obj)
-			print("MonteGodot: Job '%s', Super-batch %d - Preprocessing complete (%d tasks prepared for run stage)." % [current_job_name, sb_idx + 1, preprocessed_cases.size()])
+			# preprocess_case modifies case_obj in-place and returns it.
+			for case_obj: Case in cases_for_this_super_batch:
+				preprocess_case(case_obj) # Modifies case_obj directly
+			print("MonteGodot: Job '%s', Super-batch %d - Preprocessing complete (%d tasks prepared for run stage)." % [current_job_name, sb_idx + 1, cases_for_this_super_batch.size()])
 
 			var batch_processor_started: bool = _batch_processor.process(
-				preprocessed_cases, # Pass the collected arrays of arguments
-				run_case,
+				cases_for_this_super_batch, # Pass the cases for this super_batch
+				run_case, # This is self.run_case, which takes a Case object
 				_current_config.inner_batch_size,
 				_current_config.num_threads
 			)
-			#generate_out_vars(_current_config.inner_batch_size)
 
 			if not batch_processor_started:
 				push_error("MonteGodot: Job '%s', Super-batch %d - Failed to start BatchProcessor." % [current_job_name, sb_idx + 1])
-				# How to handle this error? For now, log and this SB might be skipped for results collection
-				# Potentially add error markers to cases or job_stats
 				continue # Skip to next super-batch
 			
 			print("MonteGodot: Job '%s', Super-batch %d - BatchProcessor initiated. Waiting..." % [current_job_name, sb_idx + 1])
@@ -190,38 +190,42 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			print("MonteGodot: Job '%s', Super-batch %d - BatchProcessor completed (%d results)." % [current_job_name, sb_idx + 1, batch_run_results_for_sb.size()])
 
 			# 4a. Postprocessing Stage for Super-batch
-			if batch_run_results_for_sb.size() != current_super_batch_cases.size():
+			if batch_run_results_for_sb.size() != cases_for_this_super_batch.size():
 				push_warning("MonteGodot: Job '%s', Super-batch %d - Mismatch in case count (%d) and batch results (%d). Results might be misaligned." %
-					[current_job_name, sb_idx + 1, current_super_batch_cases.size(), batch_run_results_for_sb.size()])
-				# Continue processing with potentially misaligned data, or handle error more strictly?
-				# For now, we'll proceed but this warning is critical.
+					[current_job_name, sb_idx + 1, cases_for_this_super_batch.size(), batch_run_results_for_sb.size()])
 
-			for i: int in range(current_super_batch_cases.size()):
-				var original_case_obj: Case = current_super_batch_cases[i]
+			for i: int in range(cases_for_this_super_batch.size()):
+				var original_case_obj: Case = cases_for_this_super_batch[i]
 				
 				if i < batch_run_results_for_sb.size() and batch_run_results_for_sb[i] is Case:
 					var processed_case_data: Case = batch_run_results_for_sb[i]
-					# Transfer results from the processed_case_data (from BatchProcessor) 
-					# to the original_case_obj.
 					original_case_obj.run_output = processed_case_data.run_output
 					original_case_obj.start_time_msec = processed_case_data.start_time_msec
 					original_case_obj.end_time_msec = processed_case_data.end_time_msec
 					original_case_obj.runtime_msec = processed_case_data.runtime_msec
-					# Any other fields set by run_case should be transferred here if necessary.
-					# Note: sim_input_args was already on original_case_obj from its own preprocess_case call.
 				else:
-					# Handle missing or mismatched result for this case
 					push_warning("MonteGodot: Job '%s', Super-batch %d, Case index %d - Missing or invalid result from BatchProcessor. Postprocessing may use stale/no run_output." % [current_job_name, sb_idx + 1, original_case_obj.id if original_case_obj else i])
-					# original_case_obj.run_output might remain empty or from a previous state.
 
-				# Now call postprocess_case on the original_case_obj, which now has the correct run_output.
-				var postprocessed_original_case: Case = postprocess_case(original_case_obj)
-				collected_processed_cases.append(postprocessed_original_case) 
-				# Assuming postprocess_case modifies original_case_obj and returns it, 
-				# or that collected_processed_cases should store these.
-				# Current postprocess_case adds OutVals to the passed Case and returns it.
+				var postprocessed_original_case: Case = postprocess_case(original_case_obj) # Modifies original_case_obj
+				
+				var case_out_vals: Array[OutVal] = postprocessed_original_case.get_output_values()
+				for out_val_instance: OutVal in case_out_vals:
+					var ov_name: StringName = out_val_instance.name
+					if not job_outputs_raw_data.has(ov_name):
+						job_outputs_raw_data[ov_name] = []
+					job_outputs_raw_data[ov_name].append(out_val_instance.get_raw_data())
+
+					# Temporary debug print for HandTypeResult aggregation (now commented out due to verbosity)
+					# if ov_name == &"HandTypeResult":
+					# 	print("DEBUG MonteGodot: Appended HandTypeResult for case_id %d. Current OutVar count for HandTypeResult: %d" % [original_case_obj.id, job_outputs_raw_data[ov_name].size()])
+
+				if _current_config.save_case_data:
+					collected_processed_cases.append(postprocessed_original_case)
 			
 			print("MonteGodot: Job '%s', Super-batch %d - Postprocessing complete." % [current_job_name, sb_idx + 1])
+			
+			# At this point, cases_for_this_super_batch and its Case objects (and their InVals)
+			# will go out of scope with the next super-batch iteration, unless they were saved to collected_processed_cases.
 
 		# End of super-batches loop for the current job
 		var overall_job_duration_msec: int = Time.get_ticks_msec() - overall_job_start_time_msec
@@ -237,55 +241,43 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		}
 
 		# --- Create OutVar instances for the completed job --- 
-		var current_job_out_vars: Dictionary = {}
-		if not collected_processed_cases.is_empty():
-			var unique_out_val_names: Dictionary = {} # Use as a set: StringName -> bool
-			for case_obj: Case in collected_processed_cases:
-				var case_out_vals: Array[OutVal] = case_obj.get_output_values()
-				for ov: OutVal in case_out_vals:
-					unique_out_val_names[ov.name] = true
-
-			for out_var_name_sn: StringName in unique_out_val_names.keys():
-				var all_raw_vals_for_name: Array = []
-				# Placeholder for first_case_is_median logic for OutVars.
-				# This might come from JobConfig or be a global setting.
-				var first_is_median_for_outvar: bool = _current_config.first_case_is_median if _current_config else false
-				var valmap_override_for_name: Dictionary = {} # Default to empty, OutVar can auto-gen if needed
-
-				for case_obj: Case in collected_processed_cases:
-					var case_out_vals: Array[OutVal] = case_obj.get_output_values()
-					var found_in_case: bool = false
-					for ov: OutVal in case_out_vals:
-						if ov.name == out_var_name_sn:
-							all_raw_vals_for_name.append(ov.get_raw_data())
-							found_in_case = true
-							break
-					if not found_in_case:
-						all_raw_vals_for_name.append(null) # Append null if specific OutVal not found
-						# Consider if a warning is needed here, or if this is expected behavior
-						# push_warning("MonteGodot: Job '%s', Case %d missing OutVal for '%s'. Appending null." % [current_job_name, case_obj.id, out_var_name_sn])
-				
-				if not all_raw_vals_for_name.is_empty():
-					var new_out_var: OutVar = OutVar.new(
-						out_var_name_sn,
-						all_raw_vals_for_name,
-						valmap_override_for_name,
-						first_is_median_for_outvar
-						# datasource could be passed if relevant
-					)
-					current_job_out_vars[out_var_name_sn] = new_out_var
-				# else: No values collected, OutVar not created for this name.
+		# Iterate through the aggregated raw data for each output variable name
+		for out_var_name_sn: StringName in job_outputs_raw_data:
+			var all_raw_vals_for_name: Array = job_outputs_raw_data[out_var_name_sn]
+			
+			# Placeholder for sourcing valmap_override. 
+			# This could come from JobConfig (e.g., a Dictionary of valmaps per OutVar name)
+			# or be determined by some other logic if needed. For now, default to empty.
+			var valmap_override_for_name: Dictionary = {} 
+			# TODO: Allow JobConfig to specify valmaps for specific OutVars by name.
+			# var job_specific_valmaps = _current_config.get_valmap_for_outvar(out_var_name_sn) # Example
+			
+			if not all_raw_vals_for_name.is_empty():
+				var new_out_var: OutVar = OutVar.new(
+					out_var_name_sn,
+					all_raw_vals_for_name,
+					valmap_override_for_name,
+					_current_config.first_case_is_median
+					# datasource could be passed if relevant, e.g., if OutVals were imported
+				)
+				current_job_out_vars[out_var_name_sn] = new_out_var
+			# else: No values collected for this name (should not happen if job_outputs_raw_data was populated correctly)
 
 		job_stats["output_variables_summary"] = current_job_out_vars # Adding the OutVars to stats for now
 		# -----------------------------------------------------
 
 		print("MonteGodot: Job '%s' completed. Total time: %.2f sec." % [current_job_name, float(overall_job_duration_msec) / 1000.0])
 
-		all_aggregated_results[current_job_name] = {"results": collected_processed_cases, "stats": job_stats, "output_vars": current_job_out_vars}
-		job_completed.emit(current_job_name, collected_processed_cases, job_stats, current_job_out_vars)
+		var results_to_emit: Array = []
+		if _current_config.save_case_data:
+			results_to_emit = collected_processed_cases
+		# Else, results_to_emit remains an empty array by default, as Cases were not stored.
+		
+		all_aggregated_results[current_job_name] = {"results": results_to_emit, "stats": job_stats, "output_vars": current_job_out_vars}
+		job_completed.emit(current_job_name, results_to_emit, job_stats, current_job_out_vars)
 
 	_is_running_jobs = false
-	all_jobs_completed.emit(all_aggregated_results)
+	all_jobs_completed.emit(all_aggregated_results) # This will also need adjustment if results are conditional
 	print("MonteGodot: All jobs completed.")
 	return OK 
 

@@ -7,11 +7,12 @@
 [resource]
 script = ExtResource("1_naehn")
 job_name = &"poker_hands_job"
-n_cases = 1000000
+n_cases = 6000000
 num_threads = -1
-first_case_is_median = 0
-super_batch_size = 1000
-inner_batch_size = 500
+first_case_is_median = false
+save_case_data = false
+super_batch_size = 10000
+inner_batch_size = 1000
 in_vars = Array[ExtResource("1_3nwwo")]([ExtResource("2_cobg0")])
 other_configs = {}
 metadata/_custom_type_script = "uid://dhfvnpa36t4em"

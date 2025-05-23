@@ -62,8 +62,12 @@ func _process_batches(tasks_to_process: Array, batch_size: int, p_max_threads: i
 	elif tasks_to_process.is_empty(): # handles case where tasks_to_process is empty initially.
 		total_batches = 0
 
-	print("BatchProcessor._process_batches: Processing %d tasks in %d batches (batch size: %d) using up to %d threads." % 
-		[tasks_to_process.size(), total_batches, batch_size, p_max_threads])
+	var threads_display_text: String = str(p_max_threads)
+	if p_max_threads <= 0:
+		threads_display_text = "all available"
+
+	print("BatchProcessor._process_batches: Processing %d tasks in %d batches (batch size: %d) using %s threads." % 
+		[tasks_to_process.size(), total_batches, batch_size, threads_display_text])
 		
 	for i: int in range(total_batches):
 		_batch_index = i * batch_size
