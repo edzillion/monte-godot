@@ -138,7 +138,7 @@ func get_configured_invar_by_name(variable_name: StringName) -> InVar:
 				new_in_var.num_map = num_map_override.duplicate(true)
 			
 			# The seed from var_config_dict.get("seed") is not directly applied to InVar.
-			# It needs to be handled by the SimManager or Case generation logic.
+			# It needs to be handled by Monte Godot or Case generation logic.
 			return new_in_var
 			
 	push_warning("JobConfig ('%s'): Input variable configuration for '%s' not found." % [job_name, variable_name])
