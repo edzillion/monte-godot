@@ -23,6 +23,6 @@ histogram_values = Array[float]([])
 histogram_probabilities = Array[float]([])
 pseudo_c = 0.1
 swr_deck_size = 52
-swr_sample_count = 5
+swr_sample_count = 7
 swr_actual_method = 6
 metadata/_custom_type_script = "uid://gxkhtbbos2yk"

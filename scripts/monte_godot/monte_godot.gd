@@ -21,6 +21,8 @@ var in_vars: Dictionary[StringName, InVar] = {}
 
 var _job_configs: Array[JobConfig] = []
 var _current_config: JobConfig = null
+var _performance_monitor: Performance
+var _current_job_peak_mem: float = 0.0
 
 func _init() -> void:
 	_batch_processor = BatchProcessor.new()
@@ -174,6 +176,8 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 				preprocess_case(case_obj) # Modifies case_obj directly
 			print("MonteGodot: Job '%s', Super-batch %d - Preprocessing complete (%d tasks prepared for run stage)." % [current_job_name, sb_idx + 1, cases_for_this_super_batch.size()])
 
+			# This is the logical point for the peak memory update for the super_batch:
+			_current_job_peak_mem = Performance.get_monitor(Performance.Monitor.MEMORY_STATIC_MAX)
 			var batch_processor_started: bool = _batch_processor.process(
 				cases_for_this_super_batch, # Pass the cases for this super_batch
 				run_case, # This is self.run_case, which takes a Case object
@@ -237,7 +241,8 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			"avg_preprocess_time_per_super_batch_msec": 0.0, 
 			"avg_run_time_per_super_batch_msec": 0.0,
 			"avg_postprocess_time_per_super_batch_msec": 0.0,
-			"cases_processed": collected_processed_cases.size()
+			"cases_processed": collected_processed_cases.size(),
+			"peak_memory_bytes": _current_job_peak_mem # Add peak memory to stats
 		}
 
 		# --- Create OutVar instances for the completed job --- 
@@ -301,7 +306,7 @@ func preprocess_case(case_obj: Case) -> Case:
 func run_case(case: Case) -> Case:
 	case.stage = Case.CaseStage.RUN
 	case.start_time_msec = Time.get_ticks_msec()
-	var case_args: Array[int] = case.sim_input_args
+	var case_args: Array = case.sim_input_args
 	case.run_output = _current_config.run_callable.call(case_args)
 	case.end_time_msec = Time.get_ticks_msec()
 	case.runtime_msec = case.end_time_msec - case.start_time_msec	
