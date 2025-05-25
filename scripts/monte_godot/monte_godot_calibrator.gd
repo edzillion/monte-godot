@@ -12,13 +12,13 @@ signal calibration_finished(results: Array[Dictionary])
 ## Results is an array of dictionaries, each with:
 ## {"super_batch_size": int, "time_msec": int, "peak_mem_bytes": int, "peak_mem_mb": float}
 
-const DEFAULT_CALIBRATION_N_CASES: int = 10000 # Number of cases to run for each test point
-const DEFAULT_SUPER_BATCH_SIZES_TO_TEST: Array[int] = [100, 500, 1000, 2500, 5000, 10000]
+# const DEFAULT_CALIBRATION_N_CASES: int = 1000 # Number of cases to run for each test point
+const DEFAULT_SUPER_BATCH_SIZES_TO_TEST: Array[int] = [10000, 50000, 100000, 250000, 300000, 400000]
 
 var _monte_godot_instance: MonteGodot = null
 var _base_job_config: JobConfig = null
 var _test_super_batch_sizes: Array[int] = []
-var _calibration_n_cases: int = DEFAULT_CALIBRATION_N_CASES
+# var _calibration_n_cases: int = DEFAULT_CALIBRATION_N_CASES
 
 var _current_test_idx: int = 0
 var _results_array: Array[Dictionary] = []
@@ -65,20 +65,34 @@ func run_calibration(
 	_test_super_batch_sizes = unique_sizes
 	
 	if _test_super_batch_sizes.is_empty():
-		push_warning("MonteGodotCalibrator: No valid super_batch_sizes to test.")
+		push_warning("MonteGodotCalibrator: No valid super_batch_sizes (batch sizes to test) to test.")
 		calibration_finished.emit([])
 		return
 
+	# _calibration_n_cases is no longer set from p_calibration_n_cases or DEFAULT_CALIBRATION_N_CASES here.
+	# It will be set to test_sbs for each job.
+	# The p_calibration_n_cases parameter to run_calibration is now ignored.
 	if p_calibration_n_cases > 0:
-		_calibration_n_cases = p_calibration_n_cases
-	else:
-		_calibration_n_cases = DEFAULT_CALIBRATION_N_CASES
+		# This parameter is effectively ignored now as n_cases is set per test_sbs.
+		# We can keep this to avoid breaking the signature or remove it later.
+		print("MonteGodotCalibrator: Info - p_calibration_n_cases parameter is currently ignored.")
 
 	# Connect to the MonteGodot instance signals ONCE
-	if not _monte_godot_instance.job_completed.is_connected(_on_monte_godot_job_completed):
-		_monte_godot_instance.job_completed.connect(_on_monte_godot_job_completed)
+	if not _monte_godot_instance.job_completed.is_connected(_on_monte_godot_job_completed_individual_job_data_gathering): # Renamed old handler
+		# This connection is for individual job data like peak memory if needed before all_jobs_completed
+		# However, for sequencing the next calibration run, we will use all_jobs_completed.
+		# For now, let's assume all necessary stats are in all_jobs_completed's payload or can be derived.
+		# If specific per-job signals are needed for UI or detailed logging before a job set finishes,
+		# a separate handler for job_completed could be maintained but NOT for sequencing.
+		# Let's simplify and assume we only need the final stats from all_jobs_completed.
+		# So, we might not even need to connect to job_completed if all_jobs_completed provides enough.
+		# For now, let's remove the direct connection to the old sequencing handler.
+		pass
+
+	if not _monte_godot_instance.all_jobs_completed.is_connected(_on_monte_godot_all_jobs_completed_for_sequencing):
+		_monte_godot_instance.all_jobs_completed.connect(_on_monte_godot_all_jobs_completed_for_sequencing)
 	
-	calibration_update.emit("Starting calibration with %d n_cases per test." % _calibration_n_cases)
+	calibration_update.emit("Starting calibration. Each 'Super Batch Size' test point will run that many cases.") # Updated message
 	_run_next_calibration_job()
 
 
@@ -88,18 +102,33 @@ func _run_next_calibration_job() -> void:
 		return
 
 	var test_sbs: int = _test_super_batch_sizes[_current_test_idx]
+	# For this calibration mode, n_cases for the job IS the super_batch_size we are testing.
+	var current_n_cases_for_job: int = test_sbs 
 
 	# Create a derived JobConfig for this specific test run
 	var test_job_config: JobConfig = _base_job_config.duplicate(true) # Deep duplicate
+
+	# Explicitly re-assign callables to ensure they are correct on the duplicated instance
+	# This is a safeguard in case duplicate(true) doesn't handle Callables perfectly for this use case.
+	if test_job_config: # Only if duplication itself succeeded
+		test_job_config.preprocess_callable = _base_job_config.preprocess_callable
+		test_job_config.run_callable = _base_job_config.run_callable
+		test_job_config.postprocess_callable = _base_job_config.postprocess_callable
+	
+	assert(test_job_config.preprocess_callable.is_valid(), "Calibrator: preprocess_callable is invalid after duplicate() but before explicit re-assignment.")
+	assert(test_job_config.run_callable.is_valid(), "Calibrator: run_callable is invalid after duplicate() but before explicit re-assignment.")
+	assert(test_job_config.postprocess_callable.is_valid(), "Calibrator: postprocess_callable is invalid after duplicate() but before explicit re-assignment.")
+	
+	
 	
 	# Fallback duplication if JobConfig.duplicate(true) is not sufficient or custom class behavior is needed
 	# This assumes JobConfig.new can reconstruct from parts if duplicate() is not fully deep for callables or complex objects.
 	if not test_job_config or not test_job_config.preprocess_callable.is_valid(): # Check if duplication worked as expected
 		test_job_config = JobConfig.new(
 			_base_job_config.job_name, # Keep original name prefix for identification
-			_calibration_n_cases,
+			current_n_cases_for_job, # n_cases is the SBS being tested
 			_base_job_config.num_threads,
-			test_sbs, # Current SBS to test
+			test_sbs, # Current SBS to test (also used as super_batch_size for the job)
 			_base_job_config.inner_batch_size,
 			_base_job_config.preprocess_callable, # Assign callables directly
 			_base_job_config.run_callable,
@@ -108,13 +137,14 @@ func _run_next_calibration_job() -> void:
 			_base_job_config.other_configs.duplicate(true) # Deep duplicate other configs
 		)
 
-	test_job_config.job_name = &"%s_Calib_NC%d_SBS%d" % [_base_job_config.job_name, _calibration_n_cases, test_sbs]
-	test_job_config.n_cases = _calibration_n_cases
-	test_job_config.super_batch_size = test_sbs
+	test_job_config.job_name = &"%s_Calib_NC%d_SBS%d" % [_base_job_config.job_name, current_n_cases_for_job, test_sbs]
+	test_job_config.n_cases = current_n_cases_for_job
+	test_job_config.super_batch_size = test_sbs # Ensure super_batch_size is also the SBS for one chunk
 	test_job_config.save_case_data = false # Ensure we don't save case data during calibration
 	test_job_config.first_case_is_median = _base_job_config.first_case_is_median # Preserve this setting
+	test_job_config.inner_batch_size = 1000 # Force inner_batch_size for calibration runs
 
-	calibration_update.emit("Testing Super Batch Size: %d" % test_sbs)
+	calibration_update.emit("Testing Batch Size (n_cases = super_batch_size): %d, Inner Batch Size: %d" % [test_sbs, test_job_config.inner_batch_size]) # Updated message
 	
 	var result = await _monte_godot_instance.run_simulations([test_job_config])
 	if result != OK: # Check if MonteGodot itself reported an immediate failure to start
@@ -129,49 +159,96 @@ func _run_next_calibration_job() -> void:
 		_results_array.append(error_entry)
 		calibration_job_completed.emit(test_sbs, -1, -1) # Emit failure for this job
 		_current_test_idx += 1
-		_run_next_calibration_job() # Try next job
+		_run_next_calibration_job() # Try next job directly
+		return # Ensure no further execution in this branch
 
 
-func _on_monte_godot_job_completed(job_name: StringName, _job_results: Array[Case], job_stats: Dictionary, _job_output_vars: Dictionary) -> void:
+# Renamed old handler - this might be repurposed or removed if all_jobs_completed is sufficient
+func _on_monte_godot_job_completed_individual_job_data_gathering(job_name: StringName, _job_results: Array[Case], job_stats: Dictionary, _job_output_vars: Dictionary) -> void:
+	# This function is no longer responsible for sequencing via _run_next_calibration_job()
+	# It could be used for logging detailed progress of individual jobs if needed.
+	# For now, its sequencing role is removed.
+	# We need to ensure the data for _results_array is correctly populated by the new handler.
+	pass
+
+
+func _on_monte_godot_all_jobs_completed_for_sequencing(all_aggregated_results: Dictionary) -> void:
+	# Since the calibrator runs one job config at a time via MonteGodot,
+	# all_aggregated_results will contain information for that single job.
+
+	if all_aggregated_results.is_empty():
+		push_warning("MonteGodotCalibrator: Received empty all_aggregated_results. Cannot process.")
+		# Decide how to handle this - possibly log error and attempt next job or finish.
+		_current_test_idx += 1
+		_run_next_calibration_job()
+		return
+
+	# Extract the job name and its data (assuming one job was run)
+	var actual_job_name: StringName = all_aggregated_results.keys()[0]
+	var job_data: Dictionary = all_aggregated_results[actual_job_name]
+	var job_stats: Dictionary = job_data.get("stats", {})
+
 	# Check if the job_name matches what we expect for the current calibration step.
-	# This is important if multiple systems might be using the same MonteGodot instance, though unlikely here.
-	var expected_sbs: int = _test_super_batch_sizes[_current_test_idx]
-	var expected_job_name_fragment = &"_Calib_NC%d_SBS%d" % [_calibration_n_cases, expected_sbs]
+	if _current_test_idx >= _test_super_batch_sizes.size():
+		# This can happen if _finish_calibration was already called due to some race or error.
+		push_warning("MonteGodotCalibrator: _on_monte_godot_all_jobs_completed_for_sequencing called but _current_test_idx is out of bounds. Current idx: %d, SBS array size: %d. Ignoring." % [_current_test_idx, _test_super_batch_sizes.size()])
+		return
 
-	if not str(job_name).contains(str(expected_job_name_fragment)):
-		# This job_completed signal is not for the current calibration test point. Ignore.
-		# This could happen if the MonteGodot instance was used by something else concurrently.
-		# For this calibrator, we assume sequential, dedicated use of the _monte_godot_instance.
+	var expected_sbs: int = _test_super_batch_sizes[_current_test_idx]
+	# The job name now reflects n_cases being equal to sbs
+	var expected_job_name_fragment = &"_Calib_NC%d_SBS%d" % [expected_sbs, expected_sbs]
+
+	if not str(actual_job_name).contains(str(expected_job_name_fragment)):
+		push_warning("MonteGodotCalibrator: all_jobs_completed signal for job '%s' does not match expected fragment '%s' for current test SBS %d. Job name expected NC and SBS to be %d. Ignoring." % [actual_job_name, expected_job_name_fragment, expected_sbs, expected_sbs])
+		# This might indicate a logic error or concurrent use. For now, we just return and don't advance.
 		return
 
 	var time_taken_msec: int = -1
 	var peak_mem: int = -1
 	var error_str: String = ""
 
-	if job_stats.has("error"):
+	if job_stats.has("error") and not job_stats["error"].is_empty():
 		error_str = job_stats["error"]
-		push_warning("MonteGodotCalibrator: Job '%s' (SBS: %d) failed: %s" % [job_name, expected_sbs, error_str])
+		push_warning("MonteGodotCalibrator: Job '%s' (SBS: %d) reported failure in all_jobs_completed: %s" % [actual_job_name, expected_sbs, error_str])
 	else:
 		time_taken_msec = job_stats.get("total_execution_time_msec", -1)
-		peak_mem = job_stats.get("peak_memory_bytes", -1)
+		peak_mem = job_stats.get("peak_memory_bytes", -1) # This is in bytes.
+		
 		if time_taken_msec == -1 or peak_mem == -1:
-			error_str = "Missing time or memory data in job_stats."
-			push_warning("MonteGodotCalibrator: Job '%s' (SBS: %d) - %s" % [job_name, expected_sbs, error_str])
+			if error_str.is_empty(): # Only set this if no specific error from job_stats
+				error_str = "Missing time or memory data in job_stats from all_jobs_completed."
+			push_warning("MonteGodotCalibrator: Job '%s' (SBS: %d) - %s" % [actual_job_name, expected_sbs, error_str])
 		else:
-			calibration_update.emit("Super Batch Size %d: Time: %d ms, Peak Memory: %.2f MB" % [expected_sbs, time_taken_msec, float(peak_mem) / (1024.0*1024.0)])
+			calibration_update.emit("Super Batch Size %d: Time: %d ms, Peak Memory: %.2f MB (from all_jobs_completed)" % [expected_sbs, time_taken_msec, float(peak_mem) / (1024.0*1024.0)])
+
+	var peak_mem_mb: float = -1.0
+	if peak_mem > -1:
+		peak_mem_mb = float(peak_mem) / (1024.0 * 1024.0)
+
+	var total_physical_memory_bytes: int = 0
+	var mem_info: Dictionary = OS.get_memory_info()
+	if mem_info.has("physical"):
+		total_physical_memory_bytes = mem_info["physical"]
+	
+	var peak_mem_percentage: float = -1.0
+	if peak_mem > -1 and total_physical_memory_bytes > 0:
+		peak_mem_percentage = (float(peak_mem) / total_physical_memory_bytes) * 100.0
 
 	var result_entry: Dictionary = {
 		"super_batch_size": expected_sbs,
 		"time_msec": time_taken_msec,
-		"peak_mem_bytes": peak_mem,
-		"peak_mem_mb": float(peak_mem) / (1024.0 * 1024.0) if peak_mem > -1 else -1.0,
+		# "peak_mem_bytes": peak_mem, # Removed as per request
+		"peak_mem_mb": peak_mem_mb,
+		"peak_mem_percentage": peak_mem_percentage,
 		"error": error_str
 	}
 	_results_array.append(result_entry)
+	# Emitting the old calibration_job_completed signal for compatibility with any external listeners,
+	# but it's no longer used for internal sequencing by this class.
 	calibration_job_completed.emit(expected_sbs, time_taken_msec, peak_mem)
 
 	_current_test_idx += 1
-	_run_next_calibration_job()
+	_run_next_calibration_job() # Direct call to run the next job
 
 
 func _finish_calibration() -> void:
@@ -181,20 +258,24 @@ func _finish_calibration() -> void:
 		if not res["error"].is_empty():
 			error_msg = " (Error: %s)" % res["error"]
 
-		if res["time_msec"] == -1 or res["peak_mem_bytes"] == -1 and res["error"].is_empty(): # If no specific error but data is bad
+		if (res["time_msec"] == -1 or res["peak_mem_mb"] == -1.0) and res["error"].is_empty(): # If no specific error but data is bad
 			error_msg += " (Incomplete data received)"
 		
-		if res["time_msec"].is_nan() or res["peak_mem_mb"].is_nan(): # Check for NaN from calculations
-			error_msg += " (Calculation resulted in NaN)"
 
-
-		if res["time_msec"] == -1 or res["peak_mem_bytes"] == -1 or res["time_msec"].is_nan() or res["peak_mem_mb"].is_nan():
+		# Check for FAILED condition based on sentinel values, .is_nan() checks removed as per user request
+		if res["time_msec"] == -1 or res["peak_mem_mb"] == -1.0:
 			calibration_update.emit("  Super Batch Size: %d - FAILED%s" % [res["super_batch_size"], error_msg])
 		else:
-			calibration_update.emit("  Super Batch Size: %d - Time: %4d ms - Peak Memory: %6.2f MB%s" % \
-				[res["super_batch_size"], res["time_msec"], res["peak_mem_mb"], error_msg])
+			var percentage_str: String = "N/A"
+			if res["peak_mem_percentage"] > -1.0:
+				percentage_str = "%.2f%% of total" % res["peak_mem_percentage"]
+			
+			calibration_update.emit("  Super Batch Size: %d - Time: %4d ms - Peak Memory: %6.2f MB (%s)%s" % \
+				[res["super_batch_size"], res["time_msec"], res["peak_mem_mb"], percentage_str, error_msg])
 	
-	if _monte_godot_instance and _monte_godot_instance.job_completed.is_connected(_on_monte_godot_job_completed):
-		_monte_godot_instance.job_completed.disconnect(_on_monte_godot_job_completed)
+	if _monte_godot_instance and _monte_godot_instance.job_completed.is_connected(_on_monte_godot_job_completed_individual_job_data_gathering):
+		_monte_godot_instance.job_completed.disconnect(_on_monte_godot_job_completed_individual_job_data_gathering)
+	if _monte_godot_instance and _monte_godot_instance.all_jobs_completed.is_connected(_on_monte_godot_all_jobs_completed_for_sequencing):
+		_monte_godot_instance.all_jobs_completed.disconnect(_on_monte_godot_all_jobs_completed_for_sequencing)
 
 	calibration_finished.emit(_results_array) 

@@ -1,27 +1,10 @@
 class_name Calibration extends Node
 
 var calibrator: MonteGodotCalibrator
+var _pi_job_functions_instance: PiJobFunctions
 
 const DEFAULT_JOB_CONFIG_PATH_PI_EXAMPLE: String = "res://examples/estimate_pi/estimate_pi_job.tres"
-
-# Example Pi estimation functions for the default Pi example job.
-# If a different JobConfig is used, its callables must be set appropriately by the caller.
-func _estimate_pi_preprocess(case:Case) -> Array:			
-	return [case.get_input_value(0), case.get_input_value(1)]
-
-
-func _estimate_pi_run(case_args: Array) -> Array[bool]:
-	var x: float = case_args[0]
-	var y: float = case_args[1]
-	var is_inside_circle:bool = (x*x + y*y) <= 1.0
-	return [is_inside_circle]    
-
-
-func _estimate_pi_postprocess(case_obj: Case, is_in_circle: Array[bool]) -> void: # Expects bool
-	var out_val_is_inside: OutVal = OutVal.new(&"is_inside", case_obj.id, is_in_circle[0])
-	case_obj.add_output_value(out_val_is_inside)
-	
-	
+const PiJobFunctionsScript: Script = preload("res://examples/calibration/pi_job_functions.gd")
 
 func _ready() -> void:
 	calibrator = MonteGodotCalibrator.new()
@@ -55,17 +38,32 @@ func run_config_calibration(
 	
 	# Special handling for the default Pi example to set its callables
 	if p_job_config_path == DEFAULT_JOB_CONFIG_PATH_PI_EXAMPLE:
-		base_job_config.preprocess_callable = Callable(self, "_pi_preprocess")
-		base_job_config.run_callable = Callable(self, "_pi_run")
-		base_job_config.postprocess_callable = Callable(self, "_pi_postprocess")
-		print("Info: Using placeholder Pi callables for default estimate_pi_job.tres.")
-	
+		# Instantiate or re-use the PiJobFunctions instance
+		if _pi_job_functions_instance == null or not is_instance_valid(_pi_job_functions_instance):
+			_pi_job_functions_instance = PiJobFunctionsScript.new()
+		
+		if not is_instance_valid(_pi_job_functions_instance): # Check if new() failed or instance is otherwise invalid
+			printerr("Calibration Error: Failed to create or obtain a valid PiJobFunctions instance.")
+			return # Critical error, cannot proceed with setting callables
+
+		# Set callables to the methods on the PiJobFunctions instance
+		base_job_config.preprocess_callable = Callable(_pi_job_functions_instance, "_preprocess")
+		base_job_config.run_callable = Callable(_pi_job_functions_instance, "_run")
+		base_job_config.postprocess_callable = Callable(_pi_job_functions_instance, "_postprocess")
+		print("Info: Using callables from PiJobFunctions instance for default estimate_pi_job.tres.")
+		
+		# The EstimatePi scene instance and its add_child/queue_free logic are no longer needed here
+		# as the callables are now from a RefCounted object.
+
 	# It is assumed that any other JobConfig passed will have its callables already set
 	# or set by its own script if it's a custom JobConfig class instance.
 
 	if not base_job_config.is_valid():
-		printerr("Calibration Error: Loaded JobConfig is invalid after attempting to set callables. Path: %s" % p_job_config_path)
-		push_warning("Ensure callables (preprocess, run, postprocess) are set and other parameters are correct in the JobConfig.")
+		assert(false, "Calibration Error: Loaded JobConfig is invalid after attempting to set callables. Path: %s. Ensure callables (preprocess, run, postprocess) are set and other parameters are correct." % p_job_config_path)
+		# The assert(false) will stop execution if assertions are enabled (default in debug).
+		# The return statement might become redundant or you might choose to keep it
+		# if you want to gracefully handle cases where assertions are disabled in release builds,
+		# though for "Crash Early", you'd let it fail.
 		return
 
 	calibrator.run_calibration(base_job_config, p_super_batch_sizes_to_test_override, p_calibration_n_cases_override)
@@ -83,6 +81,16 @@ func _on_calibration_update(message: String) -> void:
 
 func _on_calibration_finished(results: Array[Dictionary]) -> void:
 	print("--- CALIBRATION PROCESS FULLY COMPLETED ---")
+	if results.is_empty():
+		print("Calibration finished, but no results were generated.")
+	else:
+		print("Calibration Results (from calibration.gd):")
+		for i in range(results.size()):
+			var result_dict: Dictionary = results[i]
+			print("  Result %d:" % (i + 1))
+			for key in result_dict:
+				print("    %s: %s" % [key, str(result_dict[key])]) # Ensure value is cast to string for printing
+
 	# Results are also available in the 'results' array passed to this signal handler
 	# The MonteGodotCalibrator already prints a summary.
 	# For programmatic use, the caller can connect to calibrator.calibration_finished

@@ -35,7 +35,7 @@ var max_dim: int = 0     ## Max dimensionality of non-scalar values (0 for scala
 
 
 #region Initialization
-func _init(p_name: StringName, p_all_raw_values_from_cases: Array, p_valmap_override: Dictionary = {}, p_first_case_is_median: bool = false, p_datasource: String = "") -> void:
+func _init(p_name: StringName, p_all_raw_values_from_cases: Array, p_valmap_override: Dictionary = {}, p_first_case_is_median: bool = false, _p_datasource: String = "") -> void:
 	self.name = p_name
 	self.all_raw_values = p_all_raw_values_from_cases.duplicate(true) # Deep copy
 	self.valmap = p_valmap_override.duplicate(true) # Deep copy
@@ -57,7 +57,7 @@ func _init(p_name: StringName, p_all_raw_values_from_cases: Array, p_valmap_over
 #region Internal Helpers
 func _process_values_and_maps() -> void:
 	if self.valmap.is_empty() and not self.all_raw_values.is_empty():
-		var first_val = self.all_raw_values[0]
+		var _first_val = self.all_raw_values[0]
 		# Heuristic: if first non-null value is string, try to build valmap.
 		# For booleans, default Val conversion to 1.0/0.0 is often fine.
 		# More sophisticated auto-detection could be added.
