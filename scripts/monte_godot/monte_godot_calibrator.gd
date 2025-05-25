@@ -13,7 +13,7 @@ signal calibration_finished(results: Array[Dictionary])
 ## {"super_batch_size": int, "time_msec": int, "peak_mem_bytes": int, "peak_mem_mb": float}
 
 # const DEFAULT_CALIBRATION_N_CASES: int = 1000 # Number of cases to run for each test point
-const DEFAULT_SUPER_BATCH_SIZES_TO_TEST: Array[int] = [10000, 50000, 100000, 250000, 300000, 400000]
+const DEFAULT_SUPER_BATCH_SIZES_TO_TEST: Array[int] = [100000, 125000, 150000, 175000, 200000]
 
 var _monte_godot_instance: MonteGodot = null
 var _base_job_config: JobConfig = null
