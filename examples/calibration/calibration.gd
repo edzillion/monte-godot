@@ -3,9 +3,11 @@ class_name Calibration extends Node
 var calibrator: MonteGodotCalibrator
 var _pi_job_functions_instance: PiJobFunctions
 
-@onready var _graph_node: Graph2D = $Graph2D
+@onready var _max_memory_graph_node: Graph2D = $HBoxContainer/MaxMemory
+@onready var _time_graph_node: Graph2D = $HBoxContainer/Time
 
-var _line_series: LineSeries = null
+var _max_memory_line_series: LineSeries = null
+var _time_line_series: LineSeries = null
 
 const DEFAULT_JOB_CONFIG_PATH_PI_EXAMPLE: String = "res://examples/estimate_pi/estimate_pi_job.tres"
 const PiJobFunctionsScript: Script = preload("res://examples/calibration/pi_job_functions.gd")
@@ -16,10 +18,6 @@ func _ready() -> void:
 	calibrator.calibration_update.connect(_on_calibration_update)
 	calibrator.calibration_finished.connect(_on_calibration_finished)
 	
-	# Initialize graph node for plotting - check after nodes are ready
-	if not _graph_node:
-		push_warning("Calibration: Graph2D node not found at path specified in _graph_node. Plotting will be disabled.")
-
 	run_config_calibration(DEFAULT_JOB_CONFIG_PATH_PI_EXAMPLE)
 
 
@@ -101,10 +99,10 @@ func _on_calibration_finished(results: Array[Dictionary]) -> void:
 				print("    %s: %s" % [key, str(result_dict[key])]) # Ensure value is cast to string for printing
 
 	# Plot results if graph node is available
-	if _graph_node:
+	if _max_memory_graph_node and _time_graph_node:
 		plot_calibration_results(results)
 	else:
-		push_warning("Calibration: Graph node not found, skipping plotting.")
+		push_warning("Calibration: Graph nodes not found, skipping plotting.")
 
 	# For now, quit after attempting to plot or if plotting is skipped.
 	# You might want to add a delay or user input before quitting if you want to see the graph.
@@ -113,62 +111,112 @@ func _on_calibration_finished(results: Array[Dictionary]) -> void:
 
 # --- Plotting Functions (merged from CalibrationPlotter) ---
 func plot_calibration_results(results_data: Array[Dictionary]) -> void:
-	if not _graph_node:
-		printerr("Calibration.plot_calibration_results: Graph2D node is not assigned.")
+	if not _time_graph_node or not _max_memory_graph_node:
+		printerr("Calibration.plot_calibration_results: One or both Graph2D nodes are not assigned.")
 		return
 
-	# Instantiate and add LineSeries if it doesn't exist or was freed
-	if _line_series == null or not is_instance_valid(_line_series):
+	# Initialize Time Series
+	if _time_line_series == null or not is_instance_valid(_time_line_series):
+		_time_line_series = LineSeries.new(Color.SEA_GREEN, 2.0)
+		_time_line_series.name = "TimeLineSeries"
+		_time_graph_node.add_child(_time_line_series)
 
-		_line_series = LineSeries.new(Color.SEA_GREEN, 2.0)
-		_line_series.name = "DynamicLineSeries" # Give it a name for potential future reference/removal
-		_graph_node.add_child(_line_series)
-	# else, re-use existing _line_series
+	# Initialize Memory Series
+	if _max_memory_line_series == null or not is_instance_valid(_max_memory_line_series):
+		_max_memory_line_series = LineSeries.new(Color.DODGER_BLUE, 2.0) # Different color for memory
+		_max_memory_line_series.name = "MaxMemoryLineSeries"
+		_max_memory_graph_node.add_child(_max_memory_line_series)
 
 	if results_data.is_empty():
 		push_warning("Calibration.plot_calibration_results: No results data provided to plot.")
-		_line_series.clear_data()
+		if is_instance_valid(_time_line_series): _time_line_series.clear_data()
+		if is_instance_valid(_max_memory_line_series): _max_memory_line_series.clear_data()
 		return
 
-	var points: Array[Vector2] = []
+	var points_time: Array[Vector2] = []
+	var points_memory: Array[Vector2] = []
+
 	for result_entry in results_data:
-		if result_entry.has("super_batch_size") and result_entry.has("time_msec"):
-			var sbs: float = float(result_entry["super_batch_size"])
+		if not result_entry.has("super_batch_size"):
+			push_warning("Calibration.plot_calibration_results: Result entry missing 'super_batch_size'. Entry: %s" % str(result_entry))
+			continue
+
+		var sbs: float = float(result_entry["super_batch_size"])
+
+		# Process time data
+		if result_entry.has("time_msec"):
 			var time_ms: float = float(result_entry["time_msec"])
-			
-			# Only plot valid time entries
 			if time_ms >= 0:
-				points.append(Vector2(sbs, time_ms))
+				points_time.append(Vector2(sbs, time_ms))
 		else:
-			push_warning("Calibration.plot_calibration_results: Result entry is missing 'super_batch_size' or 'time_msec'. Entry: %s" % str(result_entry))
+			push_warning("Calibration.plot_calibration_results: Result entry for SBS %f missing 'time_msec'." % sbs)
 
-	if points.is_empty():
-		push_warning("Calibration.plot_calibration_results: No valid data points found in results_data to plot.")
-		_line_series.clear_data()
-		return
+		# Process memory data
+		if result_entry.has("peak_mem_percentage"):
+			var mem_percentage: float = float(result_entry["peak_mem_percentage"])
+			if mem_percentage >= 0:
+				points_memory.append(Vector2(sbs, mem_percentage))
+		else:
+			push_warning("Calibration.plot_calibration_results: Result entry for SBS %f missing 'peak_mem_percentage'." % sbs)
 
-	_line_series.set_data_from_Vector2_array(points)
-	_line_series._recalculate_min_and_max_limits()
-	_line_series.property_changed.emit()
+	# --- Plot Time Graph ---
+	if points_time.is_empty():
+		push_warning("Calibration.plot_calibration_results: No valid data points found for time graph.")
+		if is_instance_valid(_time_line_series): _time_line_series.clear_data()
+	else:
+		_time_line_series.set_data_from_Vector2_array(points_time)
+		_time_line_series._recalculate_min_and_max_limits()
+		_time_line_series.property_changed.emit()
 
-	# Set Graph2D limits based on series data with some padding
-	var data_min: Vector2 = _line_series.min_limits
-	var data_max: Vector2 = _line_series.max_limits
-	var padding_x: float = (data_max.x - data_min.x) * 0.1 if (data_max.x - data_min.x) > 0 else 1.0 # Avoid zero padding if only one point
-	var padding_y: float = (data_max.y - data_min.y) * 0.1 if (data_max.y - data_min.y) > 0 else 1.0
+		var time_data_min: Vector2 = _time_line_series.min_limits
+		var time_data_max: Vector2 = _time_line_series.max_limits
+		var time_padding_x: float = (time_data_max.x - time_data_min.x) * 0.1 if (time_data_max.x - time_data_min.x) > 0 else 1.0
+		var time_padding_y: float = (time_data_max.y - time_data_min.y) * 0.1 if (time_data_max.y - time_data_min.y) > 0 else 1.0
 
-	_graph_node.x_min = data_min.x - padding_x
-	_graph_node.x_max = data_max.x + padding_x
-	_graph_node.y_min = data_min.y - padding_y
-	_graph_node.y_max = data_max.y + padding_y
-	
-	# _graph_node._update_graph_limits() # This might now be redundant or even counterproductive if auto_scaling is true, as it could expand again
-	
-	_graph_node.title = "Calibration: Batch Size vs. Time"
-	_graph_node.horizontal_title = "Batch Size (Number of Cases)"
-	_graph_node.vertical_title = "Time (milliseconds)"
-	
-	_graph_node.queue_redraw()
-	
-	print("Calibration: Plotted %d points." % points.size())
+		_time_graph_node.x_min = time_data_min.x - time_padding_x
+		_time_graph_node.x_max = time_data_max.x + time_padding_x
+		_time_graph_node.y_min = time_data_min.y - time_padding_y
+		_time_graph_node.y_max = time_data_max.y + time_padding_y
+		_time_graph_node.x_tick_count = 5 # Reduce X-axis ticks
+		
+		_time_graph_node.title = "Calibration: Batch Size vs. Time"
+		_time_graph_node.horizontal_title = "Batch Size (Number of Cases)"
+		_time_graph_node.vertical_title = "Time (milliseconds)"
+		_time_graph_node.queue_redraw()
+		print("Calibration: Plotted %d points on Time graph." % points_time.size())
+
+	# --- Plot Max Memory Graph ---
+	if points_memory.is_empty():
+		push_warning("Calibration.plot_calibration_results: No valid data points found for max memory graph.")
+		if is_instance_valid(_max_memory_line_series): _max_memory_line_series.clear_data()
+	else:
+		_max_memory_line_series.set_data_from_Vector2_array(points_memory)
+		_max_memory_line_series._recalculate_min_and_max_limits()
+		_max_memory_line_series.property_changed.emit()
+
+		var mem_data_min: Vector2 = _max_memory_line_series.min_limits
+		var mem_data_max: Vector2 = _max_memory_line_series.max_limits
+		var mem_padding_x: float = (mem_data_max.x - mem_data_min.x) * 0.1 if (mem_data_max.x - mem_data_min.x) > 0 else 1.0
+		var mem_padding_y: float = (mem_data_max.y - mem_data_min.y) * 0.1 if (mem_data_max.y - mem_data_min.y) > 0 else 1.0
+
+		_max_memory_graph_node.x_min = mem_data_min.x - mem_padding_x
+		_max_memory_graph_node.x_max = mem_data_max.x + mem_padding_x
+		_max_memory_graph_node.y_min = mem_data_min.y - mem_padding_y
+		_max_memory_graph_node.y_max = mem_data_max.y + mem_padding_y
+		_max_memory_graph_node.x_tick_count = 5 # Reduce X-axis ticks
+
+		_max_memory_graph_node.title = "Calibration: Batch Size vs. Max Memory (%)"
+		_max_memory_graph_node.horizontal_title = "Batch Size (Number of Cases)"
+		_max_memory_graph_node.vertical_title = "Max Memory (%)"
+		_max_memory_graph_node.queue_redraw()
+		print("Calibration: Plotted %d points on Max Memory graph." % points_memory.size())
+
+	# Clean up LineSeries nodes after plotting to free memory
+	if is_instance_valid(_time_line_series):
+		_time_line_series.call_deferred("queue_free")
+		_time_line_series = null
+	if is_instance_valid(_max_memory_line_series):
+		_max_memory_line_series.call_deferred("queue_free")
+		_max_memory_line_series = null
+
 # --- End Plotting Functions ---

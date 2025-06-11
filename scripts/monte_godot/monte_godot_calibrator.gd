@@ -8,12 +8,50 @@ signal calibration_job_completed(super_batch_size: int, time_msec: int, peak_mem
 ## Emitted when a single calibration job for a specific super_batch_size completes.
 
 signal calibration_finished(results: Array[Dictionary])
-## Emitted when the entire calibration process is finished.
-## Results is an array of dictionaries, each with:
-## {"super_batch_size": int, "time_msec": int, "peak_mem_bytes": int, "peak_mem_mb": float}
 
-# const DEFAULT_CALIBRATION_N_CASES: int = 1000 # Number of cases to run for each test point
-const DEFAULT_SUPER_BATCH_SIZES_TO_TEST: Array[int] = [100000, 125000, 150000, 175000, 200000]
+
+const DEFAULT_SUPER_BATCH_SIZES_TO_TEST: Array[int] = [
+	# 10000, 12500, 15000, 17500, 
+	# 20000, 22500, 25000, 27500, 
+	# 30000, 32500, 35000, 37500, 
+	# 40000, 42500, 45000, 47500, 
+	# 50000, 52500, 55000, 57500, 
+	# 60000, 62500, 65000, 67500, 
+	# 70000, 72500, 75000, 77500,
+	# 80000, 82500, 85000, 87500, 
+	# 90000, 92500, 95000, 97500, 
+	# 100000, 102500, 105000, 107500, 
+	# 110000, 112500, 115000, 117500, 
+	# 120000, 122500, 125000, 127500, 
+	# 130000, 132500, 135000, 137500, 
+	# 140000, 142500, 145000, 147500, 
+	# 150000, 152500, 155000, 157500, 
+	# 160000, 162500, 165000, 167500, 
+	# 170000, 172500, 175000, 177500, 
+	# 180000, 182500, 185000, 187500, 
+	# 190000, 192500, 195000, 197500, 
+	# 200000, 202500, 205000, 207500, 
+	# 210000, 212500, 215000, 217500, 
+	# 220000, 222500, 225000, 227500,
+	# 230000, 232500, 235000, 237500,
+	# 240000, 242500, 245000, 247500,
+	# 250000, 252500, 255000, 257500,
+	# 260000, 262500, 265000, 267500,
+	# 270000, 272500, 275000, 277500,
+	# 280000, 282500, 285000, 287500,
+	# 290000, 292500, 295000, 297500,
+	# 300000, 302500, 305000, 307500,
+	# 310000, 312500, 315000, 317500,
+	# 320000, 322500, 325000, 327500,
+	# 330000, 332500, 335000, 337500,
+	# 340000, 342500, 345000, 347500,
+	# 350000, 352500, 355000, 357500,
+	# 360000, 362500, 365000, 367500,
+	370000, 372500, 375000, 377500,
+	380000, 382500, 385000, 387500,
+	390000, 392500, 395000, 397500,
+	400000, 402500, 405000, 407500,
+	]
 
 var _monte_godot_instance: MonteGodot = null
 var _base_job_config: JobConfig = null
@@ -26,15 +64,7 @@ var _results_array: Array[Dictionary] = []
 func _init() -> void:
 	_monte_godot_instance = MonteGodot.new()
 
-## Starts the calibration process.
-##
-## Parameters:
-##   p_base_job_config: The user's actual JobConfig, fully populated with their
-##                      preprocess, run, postprocess callables, and InVars.
-##   p_super_batch_sizes_to_test: Optional array of super_batch_sizes to test.
-##                                Defaults to DEFAULT_SUPER_BATCH_SIZES_TO_TEST.
-##   p_calibration_n_cases: Optional number of cases to run for each test point.
-##                          Defaults to DEFAULT_CALIBRATION_N_CASES.
+
 func run_calibration(
 	p_base_job_config: JobConfig,
 	p_super_batch_sizes_to_test: Array[int] = [],

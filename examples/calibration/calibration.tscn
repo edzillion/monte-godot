@@ -6,13 +6,23 @@
 [node name="Calibration" type="Node"]
 script = ExtResource("1_q5n1j")
 
-[node name="Graph2D" type="Control" parent="."]
-layout_mode = 3
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
+
+[node name="MaxMemory" type="Control" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+script = ExtResource("2_4ey1i")
+metadata/_custom_type_script = "uid://bmew6cxllkc4y"
+metadata/_edit_use_anchors_ = true
+
+[node name="Time" type="Control" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
 script = ExtResource("2_4ey1i")
 metadata/_custom_type_script = "uid://bmew6cxllkc4y"
 metadata/_edit_use_anchors_ = true
