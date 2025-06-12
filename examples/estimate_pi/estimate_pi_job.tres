@@ -1,7 +1,7 @@
 [gd_resource type="Resource" script_class="JobConfig" load_steps=5 format=3 uid="uid://rmjfndp1yorj"]
 
-[ext_resource type="Script" uid="uid://gxkhtbbos2yk" path="res://scripts/var/in_var.gd" id="1_7cbdq"]
-[ext_resource type="Script" uid="uid://dhfvnpa36t4em" path="res://scripts/job_config/job_config.gd" id="1_rseo3"]
+[ext_resource type="Script" uid="uid://plalblagtedr" path="res://scripts/var/in_var.gd" id="1_7cbdq"]
+[ext_resource type="Script" uid="uid://cnycs6p5x2kiw" path="res://scripts/job_config/job_config.gd" id="1_rseo3"]
 [ext_resource type="Resource" uid="uid://dv6m4j7j5obns" path="res://examples/estimate_pi/x_in_var.tres" id="2_s5xho"]
 [ext_resource type="Resource" uid="uid://b6ohnkn0nc7jl" path="res://examples/estimate_pi/y_in_var.tres" id="3_ijps7"]
 
