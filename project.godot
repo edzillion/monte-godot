@@ -22,7 +22,7 @@ StatMath="*res://addons/godot-stat-math/stat_math.gd"
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/god_plot/plugin.cfg", "res://addons/godot-stat-math/plugin.cfg", "res://addons/numdot/plugin.cfg", "res://addons/gdUnit4/plugin.cfg")
+enabled=PackedStringArray("res://addons/gdUnit4/plugin.cfg", "res://addons/god_plot/plugin.cfg", "res://addons/godot-stat-math/plugin.cfg", "res://addons/scene_graph_exporter/plugin.cfg")
 
 [rendering]
 

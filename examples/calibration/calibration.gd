@@ -210,13 +210,6 @@ func plot_calibration_results(results_data: Array[Dictionary]) -> void:
 		_max_memory_graph_node.vertical_title = "Max Memory (%)"
 		_max_memory_graph_node.queue_redraw()
 		print("Calibration: Plotted %d points on Max Memory graph." % points_memory.size())
-
-	# Clean up LineSeries nodes after plotting to free memory
-	if is_instance_valid(_time_line_series):
-		_time_line_series.call_deferred("queue_free")
-		_time_line_series = null
-	if is_instance_valid(_max_memory_line_series):
-		_max_memory_line_series.call_deferred("queue_free")
-		_max_memory_line_series = null
+	
 
 # --- End Plotting Functions ---
