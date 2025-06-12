@@ -21,6 +21,7 @@ var in_vars: Dictionary[StringName, InVar] = {}
 
 var _job_configs: Array[JobConfig] = []
 var _current_config: JobConfig = null
+var _current_job_peak_mem: float = 0.0
 
 func _init() -> void:
 	_batch_processor = BatchProcessor.new()
@@ -57,7 +58,7 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 		if not _current_config.is_valid():
 			push_warning("MonteGodot: Skipping invalid JobConfig: '%s'" % current_job_name)
 			all_aggregated_results[current_job_name] = {"results": [], "stats": {"error": "Skipped - Invalid Config"}}
-			job_completed.emit(current_job_name, [], {"error": "Invalid Config"}, {})
+			job_completed.emit(current_job_name, [] as Array[Case], {"error": "Invalid Config"}, {})
 			continue
 
 		# 0. Initialize Input Variables
@@ -174,9 +175,11 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 				preprocess_case(case_obj) # Modifies case_obj directly
 			print("MonteGodot: Job '%s', Super-batch %d - Preprocessing complete (%d tasks prepared for run stage)." % [current_job_name, sb_idx + 1, cases_for_this_super_batch.size()])
 
+			# This is the logical point for the peak memory update for the super_batch:
+			_current_job_peak_mem = Performance.get_monitor(Performance.Monitor.MEMORY_STATIC_MAX)
 			var batch_processor_started: bool = _batch_processor.process(
 				cases_for_this_super_batch, # Pass the cases for this super_batch
-				run_case, # This is self.run_case, which takes a Case object
+				Callable(self, "run_case").bind(_current_config), # Bind current_config to run_case for threaded execution
 				_current_config.inner_batch_size,
 				_current_config.num_threads
 			)
@@ -237,7 +240,8 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 			"avg_preprocess_time_per_super_batch_msec": 0.0, 
 			"avg_run_time_per_super_batch_msec": 0.0,
 			"avg_postprocess_time_per_super_batch_msec": 0.0,
-			"cases_processed": collected_processed_cases.size()
+			"cases_processed": collected_processed_cases.size(),
+			"peak_memory_bytes": _current_job_peak_mem # Add peak memory to stats
 		}
 
 		# --- Create OutVar instances for the completed job --- 
@@ -268,7 +272,7 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 
 		print("MonteGodot: Job '%s' completed. Total time: %.2f sec." % [current_job_name, float(overall_job_duration_msec) / 1000.0])
 
-		var results_to_emit: Array = []
+		var results_to_emit: Array[Case] = [] # Initialize as typed empty array
 		if _current_config.save_case_data:
 			results_to_emit = collected_processed_cases
 		# Else, results_to_emit remains an empty array by default, as Cases were not stored.
@@ -285,37 +289,42 @@ func get_input_vars_typed() -> Array[InVar]:
 	var typed_in_vars: Array[InVar] = []
 	var values_array: Array = self.in_vars.values()
 	for val in values_array:
-		if val is InVar:
-			typed_in_vars.append(val)
-		else:
-			push_error("MonteGodot: Non-InVar type found in self.in_vars. This should not happen. Value: %s" % str(val))
+		typed_in_vars.append(val)
 	return typed_in_vars
 
 func preprocess_case(case_obj: Case) -> Case:
-	case_obj.stage = Case.CaseStage.PREPROCESS
-
-	case_obj.sim_input_args = _current_config.preprocess_callable.call(case_obj)
-	
+	case_obj.stage = Case.CaseStage.PREPROCESS # Assuming Case.CaseStage enum exists
+	if _current_config and _current_config.preprocess_callable.is_valid():
+		# The result of preprocess_callable is stored in sim_input_args
+		case_obj.sim_input_args = _current_config.preprocess_callable.call(case_obj)
+	else:
+		push_error("MonteGodot ('%s'): Preprocess callable is not valid." % _current_config.job_name if _current_config else "MonteGodot: _current_config is null for preprocess")
+		case_obj.sim_input_args = [] # Ensure it's an array, even if empty
 	return case_obj
 
-func run_case(case: Case) -> Case:
-	case.stage = Case.CaseStage.RUN
-	case.start_time_msec = Time.get_ticks_msec()
-	var case_args: Array[int] = case.sim_input_args
-	case.run_output = _current_config.run_callable.call(case_args)
-	case.end_time_msec = Time.get_ticks_msec()
-	case.runtime_msec = case.end_time_msec - case.start_time_msec	
+func run_case(case_obj: Case, p_job_config: JobConfig) -> Case: # p_job_config is bound by the BatchProcessor call
+	case_obj.stage = Case.CaseStage.RUN # Assuming Case.CaseStage enum exists
+	var start_time_msec: int = Time.get_ticks_msec()
+	if p_job_config and p_job_config.run_callable.is_valid():
+		# run_callable takes sim_input_args (the output of preprocess) and returns the direct run_output
+		case_obj.run_output = p_job_config.run_callable.call(case_obj.sim_input_args)
+	else:
+		push_error("MonteGodot ('%s'): Run callable is not valid." % p_job_config.job_name if p_job_config else "MonteGodot: p_job_config is null in run_case")
+		case_obj.run_output = [] # Ensure it's an array, even if empty
+	case_obj.start_time_msec = start_time_msec
+	case_obj.end_time_msec = Time.get_ticks_msec()
+	case_obj.runtime_msec = case_obj.end_time_msec - case_obj.start_time_msec
+	return case_obj
 
-	return case
+func postprocess_case(case_obj: Case) -> Case:
+	case_obj.stage = Case.CaseStage.POSTPROCESS # Assuming Case.CaseStage enum exists
+	if _current_config and _current_config.postprocess_callable.is_valid():
+		# postprocess_callable takes the original case_obj and its run_output
+		# It typically modifies case_obj by adding OutVal instances.
+		_current_config.postprocess_callable.call(case_obj, case_obj.run_output)
+	else:
+		push_error("MonteGodot ('%s'): Postprocess callable is not valid." % _current_config.job_name if _current_config else "MonteGodot: _current_config is null for postprocess")
+	return case_obj
 
-func postprocess_case(case: Case) -> Case:
-	case.stage = Case.CaseStage.POSTPROCESS
-	# case.run_output directly contains the raw output values from the run_callable
-	# E.g., if run_callable returns [true, 0.5, 0.3], then case.run_output is that array.
-	var raw_run_outputs: Array = case.run_output 
-	_current_config.postprocess_callable.call(case, raw_run_outputs) # Pass the case and the raw outputs
-	
-	return case
-
-func final_postprocess(all_results: Dictionary) -> void:
+func final_postprocess(_all_results: Dictionary) -> void:
 	pass

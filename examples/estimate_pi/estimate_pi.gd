@@ -41,8 +41,10 @@ func _start_simulation():
 	monte_godot.run_simulations([estimate_pi_job])
 	
 
-func _estimate_pi_preprocess(case:Case) -> Array:			
-	return [case.get_input_value(0), case.get_input_value(1)]
+func _estimate_pi_preprocess(case:Case) -> Array[float]:
+	var inval_x: InVal = case.get_input_value(0)
+	var inval_y: InVal = case.get_input_value(1)
+	return [inval_x.get_value(), inval_y.get_value()]
 
 
 func _estimate_pi_run(case_args: Array) -> Array[bool]:
