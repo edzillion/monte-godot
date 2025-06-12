@@ -18,8 +18,8 @@ var _sobol_error_series: LineSeries = null
 var _pi_reference_series: LineSeries = null
 
 const PI_VALUE: float = PI
-const N_CASES: int = 1000000
-const SUPER_BATCH_SIZE: int = 100000  # Scale up batch size proportionally
+const N_CASES: int = 100000
+const SUPER_BATCH_SIZE: int = 10000  # Scale up batch size proportionally
 const INNER_BATCH_SIZE: int = 1000   # Scale up inner batch size too
 
 const PiJobFunctionsScript: Script = preload("res://examples/calibration/pi_job_functions.gd")
@@ -228,8 +228,9 @@ func _setup_convergence_graph(random_data: Array[Vector2], sobol_data: Array[Vec
 	_convergence_graph_node.add_child(_sobol_convergence_series)
 	_sobol_convergence_series.set_data_from_Vector2_array(sobol_data)
 	
-	# Create π reference line (black)
-	_pi_reference_series = LineSeries.new(Color.BLACK, 1.0)
+	# Create π reference line (soft purple for visibility)
+	var pi_ref_color := Color(0.6, 0.2, 0.8) # Soft purple
+	_pi_reference_series = LineSeries.new(pi_ref_color, 2.0)
 	_pi_reference_series.name = "PiReference"
 	_convergence_graph_node.add_child(_pi_reference_series)
 	var pi_line: Array[Vector2] = [Vector2(1.0, PI_VALUE), Vector2(float(N_CASES), PI_VALUE)]
@@ -285,7 +286,7 @@ func _setup_error_graph(random_errors: Array[Vector2], sobol_errors: Array[Vecto
 
 func _add_theoretical_convergence_line() -> void:
 	# Add a theoretical 1/√n convergence line for comparison
-	var theoretical_series: LineSeries = LineSeries.new(Color.GRAY, 1.0)
+	var theoretical_series: LineSeries = LineSeries.new(Color.GREEN, 1.0)
 	theoretical_series.name = "TheoreticalConvergence"
 	_error_graph_node.add_child(theoretical_series)
 	
@@ -308,8 +309,8 @@ func _setup_legend() -> void:
 	var legend_text: String = "[center][b]Legend:[/b] "
 	legend_text += "[color=orange]Random Sampling[/color] | "
 	legend_text += "[color=dodgerblue]SOBOL Sampling[/color] | "
-	legend_text += "[color=gray]Theoretical 1/√n[/color] | "
-	legend_text += "[color=black]π Reference (3.14159...)[/color][/center]"
+	legend_text += "[color=green]Theoretical 1/√n[/color] | "
+	legend_text += "[color=#9933cc]π Reference (3.14159...)[/color][/center]" # Soft purple
 	
 	_legend_label.text = legend_text
 
@@ -357,6 +358,8 @@ func _preprocess_2d_sobol(case: Case) -> Array[float]:
 	# Convert from [0,1] to [-1,1] for unit circle
 	var x: float = sample_point.x * 2.0 - 1.0
 	var y: float = sample_point.y * 2.0 - 1.0
+	if case.id < 5:
+		print("Random sample #%d: x=%f, y=%f" % [case.id, x, y])
 	return [x, y]
 
 func _run_2d_sobol(case_args: Array) -> Array[bool]:
