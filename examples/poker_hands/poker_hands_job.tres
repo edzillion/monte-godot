@@ -7,7 +7,7 @@
 [resource]
 script = ExtResource("1_naehn")
 job_name = &"poker_hands_job"
-n_cases = 6000000
+n_cases = 600000
 num_threads = -1
 first_case_is_median = false
 save_case_data = false

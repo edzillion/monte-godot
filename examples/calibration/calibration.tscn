@@ -1,0 +1,28 @@
+[gd_scene load_steps=3 format=3 uid="uid://cvjigxnjc0n6y"]
+
+[ext_resource type="Script" uid="uid://cs3a1tomxgjho" path="res://examples/calibration/calibration.gd" id="1_q5n1j"]
+[ext_resource type="Script" uid="uid://bmew6cxllkc4y" path="res://addons/god_plot/tools/graphs/graph_2d.gd" id="2_4ey1i"]
+
+[node name="Calibration" type="Node"]
+script = ExtResource("1_q5n1j")
+
+[node name="HBoxContainer" type="HBoxContainer" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="MaxMemory" type="Control" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+script = ExtResource("2_4ey1i")
+metadata/_custom_type_script = "uid://bmew6cxllkc4y"
+metadata/_edit_use_anchors_ = true
+
+[node name="Time" type="Control" parent="HBoxContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+script = ExtResource("2_4ey1i")
+metadata/_custom_type_script = "uid://bmew6cxllkc4y"
+metadata/_edit_use_anchors_ = true

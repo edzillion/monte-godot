@@ -74,8 +74,9 @@ func _process_batches(tasks_to_process: Array, batch_size: int, p_max_threads: i
 		var current_batch_end_idx: int = min(_batch_index + batch_size, tasks_to_process.size())
 		var batch_cases: Array = tasks_to_process.slice(_batch_index, current_batch_end_idx)
 		
-		print("BatchProcessor._process_batches: Starting batch %d/%d (tasks %d-%d) with %d tasks." % 
-			[i + 1, total_batches, _batch_index, current_batch_end_idx - 1, batch_cases.size()])
+		# Temporarily commented out for less verbose logging
+		# print("BatchProcessor._process_batches: Starting batch %d/%d (tasks %d-%d) with %d tasks." % \
+		# 	[i + 1, total_batches, _batch_index, current_batch_end_idx - 1, batch_cases.size()])
 		
 		var batch_group_name: String = "managed_batch_%d" % i
 		
@@ -87,7 +88,8 @@ func _process_batches(tasks_to_process: Array, batch_size: int, p_max_threads: i
 			batch_group_name
 		)
 		WorkerThreadPool.wait_for_group_task_completion(group_id)
-		print("BatchProcessor._process_batches: Batch %d/%d completed." % [i + 1, total_batches])
+		# Temporarily commented out for less verbose logging
+		# print("BatchProcessor._process_batches: Batch %d/%d completed." % [i + 1, total_batches])
 	
 	call_deferred("emit_signal", "processing_complete", _results.duplicate(true))
 

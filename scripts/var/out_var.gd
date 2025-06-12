@@ -35,7 +35,7 @@ var max_dim: int = 0     ## Max dimensionality of non-scalar values (0 for scala
 
 
 #region Initialization
-func _init(p_name: StringName, p_all_raw_values_from_cases: Array, p_valmap_override: Dictionary = {}, p_first_case_is_median: bool = false, p_datasource: String = "") -> void:
+func _init(p_name: StringName, p_all_raw_values_from_cases: Array, p_valmap_override: Dictionary = {}, p_first_case_is_median: bool = false, _p_datasource: String = "") -> void:
 	self.name = p_name
 	self.all_raw_values = p_all_raw_values_from_cases.duplicate(true) # Deep copy
 	self.valmap = p_valmap_override.duplicate(true) # Deep copy
@@ -57,7 +57,7 @@ func _init(p_name: StringName, p_all_raw_values_from_cases: Array, p_valmap_over
 #region Internal Helpers
 func _process_values_and_maps() -> void:
 	if self.valmap.is_empty() and not self.all_raw_values.is_empty():
-		var first_val = self.all_raw_values[0]
+		var _first_val = self.all_raw_values[0]
 		# Heuristic: if first non-null value is string, try to build valmap.
 		# For booleans, default Val conversion to 1.0/0.0 is often fine.
 		# More sophisticated auto-detection could be added.
@@ -176,22 +176,36 @@ func get_all_raw_values() -> Array:
 
 
 ## @brief Calculates and returns basic statistics for the numeric values of this OutVar.
-## Requires EZSTATS
-## @return A Dictionary containing mean, median, std_dev, variance, min, max, or empty if stats cannot be calculated.
+## Uses StatMath.BasicStats for comprehensive statistical analysis.
+## @return A Dictionary containing mean, median, std_dev, variance, min, max, and other statistics.
 func calculate_stats() -> Dictionary:
 	var stats_results: Dictionary = {}
-	# The 'dof' parameter in EZSTATS is used for snapping (rounding) results.
-	# It determines the step for godot_api.snapped(). 
-	# E.g., 0.01 for 2 decimal places, 0.001 for 3 decimal places.
-	var precision_step: float = 0.001 # Default to 3 decimal places
-	var sanitized_results = EZSTATS.sanitize(self.all_numeric_values)
-	stats_results = EZSTATS.all(sanitized_results, precision_step)
 	
-	# The keys in the dictionary returned by EZSTATS.all() are:
-	# "Mean", "Median", "Spread", "Minima", "Maxima", "Variance", "Standev", "Mad"
-	# We might want to add "Count" manually if not included by EZSTATS.all directly.
-	if not stats_results.has("Count") and not stats_results.has("count"):
-		stats_results["Count"] = sanitized_results.size()
+	# Sanitize the numeric values (removes NaN values and sorts the array)
+	var sanitized_results: Array[float] = StatMath.HelperFunctions.sanitize_numeric_array(self.all_numeric_values)
+	
+	# Handle empty data case
+	if sanitized_results.is_empty():
+		push_warning("OutVar '%s': No valid numeric data available for statistics calculation." % self.name)
+		return {}
+	
+	# Get comprehensive statistics from StatMath.BasicStats
+	var raw_stats: Dictionary = StatMath.BasicStats.summary_statistics(sanitized_results)
+	
+	# Map StatMath keys to EZSTATS-compatible keys for backward compatibility
+	stats_results["Mean"] = raw_stats["mean"]
+	stats_results["Median"] = raw_stats["median"]
+	stats_results["Spread"] = raw_stats["range"]  # EZSTATS "Spread" = StatMath "range"
+	stats_results["Minima"] = raw_stats["minimum"]
+	stats_results["Maxima"] = raw_stats["maximum"]
+	stats_results["Variance"] = raw_stats["variance"]
+	stats_results["Standev"] = raw_stats["standard_deviation"]
+	stats_results["Mad"] = raw_stats["median_absolute_deviation"]
+	stats_results["Count"] = raw_stats["count"]
+	
+	# Additional statistics available from StatMath (optional, can be used if needed)
+	# stats_results["SampleVariance"] = raw_stats["sample_variance"]
+	# stats_results["SampleStandev"] = raw_stats["sample_standard_deviation"]
 		
 	return stats_results
 #endregion 
