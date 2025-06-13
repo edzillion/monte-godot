@@ -82,7 +82,7 @@ var sample_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.Sa
 @export_category("Sample Without Replacement Parameters")
 @export var swr_deck_size: int = 52
 @export var swr_sample_count: int = 5
-@export var swr_actual_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.FISHER_YATES
+@export var swr_sampling_method: StatMath.SamplingGen.SamplingMethod = StatMath.SamplingGen.SamplingMethod.FISHER_YATES
 
 #endregion
 
@@ -263,7 +263,7 @@ func _update_exported_fields_from_dict(params: Dictionary) -> void:
 		DistributionType.SAMPLE_WITHOUT_REPLACEMENT:
 			swr_deck_size = params.get("deck_size", 52)
 			swr_sample_count = params.get("sample_count", 5)
-			swr_actual_method = params.get("sample_method_param", StatMath.SamplingGen.SamplingMethod.FISHER_YATES)
+			swr_sampling_method = params.get("sample_method_param", StatMath.SamplingGen.SamplingMethod.FISHER_YATES)
 		DistributionType.CUSTOM: pass
 		_: 
 			push_error("Unsupported distribution type: %s" % DistributionType.keys()[distribution_type])
@@ -295,7 +295,7 @@ func _update_dict_from_exported_fields() -> void:
 			distribution_params = {
 				"deck_size": swr_deck_size, 
 				"sample_count": swr_sample_count,
-				"sample_method_param": swr_actual_method
+				"sample_method_param": swr_sampling_method
 				}
 		DistributionType.CUSTOM: pass
 		_: 

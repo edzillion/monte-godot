@@ -13,19 +13,23 @@ enum HandTypes {
 	HIGH_CARD       # Highest card
 }
 
-# Constants for card representation
-const CARDS_IN_DECK: int = 52
-const CARDS_IN_HAND: int = 5
-const RANKS_IN_SUIT: int = 13
+
 
 var monte_godot: MonteGodot
 # Ensure this path points to your actual JobConfig resource for poker hands
 var poker_hands_job = preload("res://examples/poker_hands/poker_hands_job.tres") 
 
+# Vars for card representation
+static var cards_in_deck: int
+static var cards_in_hand: int
+static var ranks_in_suit: int = 13
+
 func _ready() -> void:
 	monte_godot = MonteGodot.new()
 	monte_godot.all_jobs_completed.connect(_final_post_process)
 	print("Starting poker hand simulation via MonteGodot job system...")
+	PokerHands.cards_in_deck = poker_hands_job.in_vars[0].swr_deck_size
+	PokerHands.cards_in_hand = poker_hands_job.in_vars[0].swr_sample_count
 	_start_simulation()
 
 func _start_simulation() -> void:
@@ -63,8 +67,8 @@ func _poker_hands_run(cards_array: Array[int]) -> Array[PokerHands.HandTypes]:
 		push_error("PokerHands run: Invalid or empty card data received. Evaluating as HIGH_CARD.")
 		return []
 	
-	if cards_array.size() != CARDS_IN_HAND:
-		push_error("PokerHands run: Incorrect number of cards (%d) received. Expected %d." % [cards_array.size(), CARDS_IN_HAND])
+	if cards_array.size() != cards_in_hand:
+		push_error("PokerHands run: Incorrect number of cards (%d) received. Expected %d." % [cards_array.size(), cards_in_hand])
 		return []
 
 	hand_type_result = PokerHandEvaluator.evaluate_hand(cards_array)
@@ -199,8 +203,8 @@ func _final_post_process(all_job_results: Dictionary) -> void:
 # to keep this file focused on the MonteGodot job setup.
 class PokerHandEvaluator:
 	static func card_to_rank_and_suit(card_index: int) -> Dictionary:
-		var rank = card_index % PokerHands.RANKS_IN_SUIT
-		var suit = card_index / PokerHands.RANKS_IN_SUIT
+		var rank = card_index % PokerHands.ranks_in_suit
+		var suit = card_index / PokerHands.ranks_in_suit
 		return {"rank": rank, "suit": suit}
 
 	static func _count_ranks(ranks: Array[int]) -> Dictionary:
@@ -220,7 +224,7 @@ class PokerHandEvaluator:
 		return true
 
 	static func _is_straight(ranks: Array[int]) -> bool:
-		if ranks.size() != PokerHands.CARDS_IN_HAND: return false # Ensure 5 cards for a poker straight
+		if ranks.size() != PokerHands.cards_in_hand: return false # Ensure 5 cards for a poker straight
 		var sorted_ranks = ranks.duplicate()
 		sorted_ranks.sort()
 		# Remove duplicates for straight check (e.g. [7,7,8,9,10] is not a straight)
@@ -231,13 +235,13 @@ class PokerHandEvaluator:
 				if sorted_ranks[i] != sorted_ranks[i-1]:
 					unique_ranks.append(sorted_ranks[i])
 		
-		if unique_ranks.size() < PokerHands.CARDS_IN_HAND : # Must be 5 unique ranks for a straight if original hand had pairs etc.
+		if unique_ranks.size() < PokerHands.cards_in_hand : # Must be 5 unique ranks for a straight if original hand had pairs etc.
 			#This check is more nuanced. A hand like [2,2,3,4,5] is not a straight.
 			#If the original hand has pairs, it can't be a straight of 5 unique cards.
 			#The card evaluation logic calls this on the 5 cards given, so if there are pairs, it won't be a straight.
 			#This unique_ranks check is more for a generic "is there a 5-card straight within these N unique ranks"
 			#For 5 cards, if unique_ranks.size() < 5, it implies pairs, so not a 5-card straight.
-			if ranks.size() == PokerHands.CARDS_IN_HAND and unique_ranks.size() < PokerHands.CARDS_IN_HAND:
+			if ranks.size() == PokerHands.cards_in_hand and unique_ranks.size() < PokerHands.cards_in_hand:
 				return false
 
 
@@ -245,20 +249,20 @@ class PokerHandEvaluator:
 		# Ranks: 0(2), 1(3), 2(4), 3(5), 4(6), 5(7), 6(8), 7(9), 8(T), 9(J), 10(Q), 11(K), 12(A)
 		var is_ace_low_straight = true
 		var ace_low_pattern = [0,1,2,3,12] # 2,3,4,5,A
-		if unique_ranks.size() == PokerHands.CARDS_IN_HAND: # Must be 5 unique ranks
-			for i in range(PokerHands.CARDS_IN_HAND):
+		if unique_ranks.size() == PokerHands.cards_in_hand: # Must be 5 unique ranks
+			for i in range(PokerHands.cards_in_hand):
 				if unique_ranks[i] != ace_low_pattern[i]:
 					is_ace_low_straight = false
 					break
 			if is_ace_low_straight: return true
 		
 		# Check for regular straight
-		if unique_ranks.size() < PokerHands.CARDS_IN_HAND: return false # Not enough unique cards for a 5-card straight
+		if unique_ranks.size() < PokerHands.cards_in_hand: return false # Not enough unique cards for a 5-card straight
 
 		for i in range(1, unique_ranks.size()):
 			if unique_ranks[i] != unique_ranks[i-1] + 1:
 				# If we are checking exactly 5 cards, and they are not ace-low, then this means no straight
-				if ranks.size() == PokerHands.CARDS_IN_HAND and unique_ranks.size() == PokerHands.CARDS_IN_HAND: # check for 5 distinct cards
+				if ranks.size() == PokerHands.cards_in_hand and unique_ranks.size() == PokerHands.cards_in_hand: # check for 5 distinct cards
 					return false 
 				# If we are checking more than 5 cards (e.g. 7 cards for Texas Hold'em best hand)
 				# then we need to see if a subsequence of 5 cards forms a straight.
@@ -267,7 +271,7 @@ class PokerHandEvaluator:
 		# If we check 5 unique cards and the ace-low failed, and they are sequential, it's a straight.
 		# e.g. unique_ranks = [8,9,10,11,12] (T,J,Q,K,A)
 		# e.g. unique_ranks = [0,1,2,3,4] (2,3,4,5,6)
-		if unique_ranks.size() == PokerHands.CARDS_IN_HAND: # Only true if 5 unique sequential cards
+		if unique_ranks.size() == PokerHands.cards_in_hand: # Only true if 5 unique sequential cards
 			return true
 		
 		return false # Default for other cases (e.g. < 5 unique cards)
@@ -279,7 +283,7 @@ class PokerHandEvaluator:
 		var sorted_ranks = ranks.duplicate()
 		sorted_ranks.sort()
 		# Ace, King, Queen, Jack, Ten
-		var required_ranks = [PokerHands.RANKS_IN_SUIT - 5, PokerHands.RANKS_IN_SUIT - 4, PokerHands.RANKS_IN_SUIT - 3, PokerHands.RANKS_IN_SUIT - 2, PokerHands.RANKS_IN_SUIT - 1] 
+		var required_ranks = [PokerHands.ranks_in_suit - 5, PokerHands.ranks_in_suit - 4, PokerHands.ranks_in_suit - 3, PokerHands.ranks_in_suit - 2, PokerHands.ranks_in_suit - 1] 
 		# Corrected: Ranks are 0-12. 10,J,Q,K,A are 8,9,10,11,12
 		required_ranks = [8,9,10,11,12]
 		return sorted_ranks == required_ranks
@@ -328,7 +332,7 @@ class PokerHandEvaluator:
 
 
 	static func evaluate_hand(card_indices: Array[int]) -> PokerHands.HandTypes:
-		if card_indices.size() != PokerHands.CARDS_IN_HAND:
+		if card_indices.size() != PokerHands.cards_in_hand:
 			return PokerHands.HandTypes.HIGH_CARD
 			
 		var ranks: Array[int] = []
