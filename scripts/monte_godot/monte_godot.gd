@@ -98,10 +98,9 @@ func run_simulations(p_job_configs: Array[JobConfig]) -> Variant:
 				# It's already of type StatMath.SamplingGen.SamplingMethod due to changes in InVar.gd.
 				var sampling_method_to_use: StatMath.SamplingGen.SamplingMethod = current_in_var.sample_method
 
-				# Derive a unique seed for this variable's percentile generation to ensure independence if desired
-				var per_var_seed: int = job_seed + current_in_var.var_idx + 1 # Simple way to vary seed per var
-				
-				var var_percentiles: Array[float] = StatMath.SamplingGen.generate_samples_1d(_current_config.n_cases, sampling_method_to_use, per_var_seed)
+				# Use StatMath's global RNG for all random sampling to ensure reproducibility and global seed control.
+				# Do NOT pass a seed here; StatMath.get_rng() will be used internally.
+				var var_percentiles: Array[float] = StatMath.SamplingGen.generate_samples_1d(_current_config.n_cases, sampling_method_to_use)
 
 				if var_percentiles.is_empty() and _current_config.n_cases > 0:
 					push_error("MonteGodot: Job '%s', InVar '%s' (%d) - Failed to generate percentiles using StatMath.SamplingGen." % [current_job_name, current_in_var.name, current_in_var.var_idx])
